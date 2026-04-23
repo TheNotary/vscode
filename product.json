@@ -33,7 +33,19 @@
 	"reportIssueUrl": "https://github.com/microsoft/vscode/issues/new",
 	"nodejsRepository": "https://nodejs.org",
 	"urlProtocol": "code-oss",
+	"quality": "stable",
+	"updateUrl": "https://update.code.visualstudio.com",
+	"downloadUrl": "https://code.visualstudio.com",
 	"webviewContentExternalBaseUrlTemplate": "https://{{uuid}}.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/",
+	"extensionsGallery": {
+		"serviceUrl": "https://marketplace.visualstudio.com/_apis/public/gallery",
+		"cacheUrl": "https://vscode.blob.core.windows.net/gallery/index",
+		"itemUrl": "https://marketplace.visualstudio.com/items",
+		"publisherUrl": "https://marketplace.visualstudio.com/publishers",
+		"resourceUrlTemplate": "https://{publisher}.vscode-unpkg.net/{publisher}/{name}/{version}/{path}",
+		"controlUrl": "https://main.vscode-cdn.net/extensions/marketplace.json",
+		"nlsBaseUrl": ""
+	},
 	"builtInExtensions": [
 		{
 			"name": "ms-vscode.js-debug-companion",
@@ -82,8 +94,38 @@
 				},
 				"publisherDisplayName": "Microsoft"
 			}
+		},
+		{
+			"name": "ms-vscode-remote.remote-wsl",
+			"version": "0.104.3",
+			"sha256": "22534172b809daa91b26d34ea2764692e24760bf07a3b1156f61e56cc8a6c4af",
+			"repo": "https://github.com/microsoft/vscode-remote-release",
+			"metadata": {
+				"id": "f0c5397b-d357-4197-99f0-cb4202f22818",
+				"publisherId": {
+					"publisherId": "ac9410a2-0d75-40ec-90de-b59bb705801d",
+					"publisherName": "ms-vscode-remote",
+					"displayName": "Microsoft",
+					"flags": "verified"
+				},
+				"publisherDisplayName": "Microsoft"
+			}
 		}
 	],
+	"extensionEnabledApiProposals": {
+		"ms-vscode-remote.remote-wsl": [
+			"resolvers",
+			"contribRemoteHelp",
+			"contribViewsRemote",
+			"telemetry"
+		]
+	},
+	"extensionUntrustedWorkspaceSupport": {
+		"ms-vscode-remote.remote-wsl": {
+			"default": true,
+			"override": true
+		}
+	},
 	"defaultChatAgent": {
 		"extensionId": "GitHub.copilot",
 		"chatExtensionId": "GitHub.copilot-chat",

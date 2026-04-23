@@ -189,6 +189,7 @@ gulp.task(task.define('core-ci-old', task.series(
 gulp.task(task.define('core-ci', task.series(
 	copyCodiconsTask,
 	compileNonNativeExtensionsBuildTask,
+	compileCopilotExtensionBuildTask,
 	compileExtensionMediaBuildTask,
 	writeISODate('out-build'),
 	// Type-check with tsgo (no emit)
@@ -545,7 +546,8 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 			result = es.merge(result, gulp.src('.build/policies/win32/**', { base: '.build/policies/win32' })
 				.pipe(rename(f => f.dirname = `policies/${f.dirname}`)));
 
-			if (quality === 'stable' || quality === 'insider') {
+			const win32ContextMenu = (product as { win32ContextMenu?: Record<string, { clsid: string }> }).win32ContextMenu;
+			if ((quality === 'stable' || quality === 'insider') && win32ContextMenu && win32ContextMenu[arch]) {
 				result = es.merge(result, gulp.src('.build/win32/appx/**', { base: '.build/win32' }));
 				const rawVersion = version.replace(/-\w+$/, '').split('.');
 				const appxVersion = `${rawVersion[0]}.0.${rawVersion[1]}.${rawVersion[2]}`;
@@ -557,7 +559,7 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 					.pipe(replace('@@ApplicationIdShort@@', product.win32RegValueName))
 					.pipe(replace('@@ApplicationExe@@', product.nameShort + '.exe'))
 					.pipe(replace('@@FileExplorerContextMenuID@@', quality === 'stable' ? 'OpenWithCode' : 'OpenWithCodeInsiders'))
-					.pipe(replace('@@FileExplorerContextMenuCLSID@@', (product as { win32ContextMenu?: Record<string, { clsid: string }> }).win32ContextMenu![arch].clsid))
+					.pipe(replace('@@FileExplorerContextMenuCLSID@@', win32ContextMenu[arch].clsid))
 					.pipe(replace('@@FileExplorerContextMenuDLL@@', `${quality === 'stable' ? 'code' : 'code_insider'}_explorer_command_${arch}.dll`))
 					.pipe(rename(f => f.dirname = `appx/manifest`)));
 			}
@@ -586,7 +588,7 @@ function patchWin32DependenciesTask(destinationFolderName: string) {
 	return async () => {
 		const versionedResourcesFolder = util.getVersionedResourcesFolder('win32', commit!);
 		const deps = (await Promise.all([
-			glob('**/*.node', { cwd, ignore: 'extensions/node_modules/@parcel/watcher/**' }),
+			glob('**/*.node', { cwd, ignore: ['extensions/node_modules/@parcel/watcher/**', '**/prebuilds/linux-*/**', '**/prebuilds/darwin-*/**', '**/vendor/audio-capture/*-linux/**', '**/vendor/audio-capture/*-darwin/**'] }),
 			glob('**/rg.exe', { cwd }),
 			glob('**/*explorer_command*.dll', { cwd }),
 		])).flatMap(o => o);
