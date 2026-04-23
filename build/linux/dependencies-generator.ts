@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import { spawnSync } from 'child_process';
+import { existsSync } from 'fs';
 import path from 'path';
 import { getChromiumSysroot, getVSCodeSysroot } from './debian/install-sysroot.ts';
 import { generatePackageDeps as generatePackageDepsDebian } from './debian/calculate-deps.ts';
@@ -56,8 +57,13 @@ export async function getDependencies(packageType: 'deb' | 'rpm', buildDir: stri
 	const appPath = path.join(buildDir, applicationName);
 	// Add the native modules
 	const files = findResult.stdout.toString().trimEnd().split('\n');
-	// Add the tunnel binary.
-	files.push(path.join(buildDir, 'bin', product.tunnelApplicationName));
+	// Add the tunnel binary (may not exist in OSS / GitHub Actions builds).
+	const tunnelBinaryPath = path.join(buildDir, 'bin', product.tunnelApplicationName);
+	if (existsSync(tunnelBinaryPath)) {
+		files.push(tunnelBinaryPath);
+	} else {
+		console.warn(`Tunnel binary not found at ${tunnelBinaryPath}, skipping dependency analysis for it.`);
+	}
 	// Add the main executable.
 	files.push(appPath);
 	// Add chrome sandbox and crashpad handler.
@@ -89,7 +95,9 @@ export async function getDependencies(packageType: 'deb' | 'rpm', buildDir: stri
 		const failMessage = 'The dependencies list has changed.'
 			+ '\nOld:\n' + referenceGeneratedDeps.join('\n')
 			+ '\nNew:\n' + sortedDependencies.join('\n');
-		if (FAIL_BUILD_FOR_NEW_DEPENDENCIES) {
+		// For OSS builds (e.g. GitHub Actions), the reference list may legitimately
+		// differ (e.g. missing tunnel binary), so warn instead of failing the build.
+		if (FAIL_BUILD_FOR_NEW_DEPENDENCIES && process.env['VSCODE_QUALITY'] !== 'oss') {
 			throw new Error(failMessage);
 		} else {
 			console.warn(failMessage);
