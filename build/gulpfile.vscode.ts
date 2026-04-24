@@ -533,9 +533,16 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 }
 
 function hasAuthenticodeSignature(filePath: string): Promise<boolean> {
-	return new Promise((resolve, reject) => {
+	return new Promise((resolve, _reject) => {
 		const proc = cp.spawn('signtool.exe', ['verify', '/pa', filePath]);
-		proc.on('error', reject);
+		proc.on('error', err => {
+			// signtool.exe not available (e.g. Windows SDK not installed in CI) — assume no signature
+			if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+				resolve(false);
+			} else {
+				_reject(err);
+			}
+		});
 		proc.on('exit', code => resolve(code === 0));
 	});
 }
