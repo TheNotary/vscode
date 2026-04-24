@@ -558,6 +558,108 @@ suite('PersistentProtocol reconnection', () => {
 			b.dispose();
 		});
 	});
+
+	test('hard timeout fires under sustained high load', async () => {
+		await runWithFakedTimers(
+			{
+				useFakeTimers: true,
+				useSetImmediate: true,
+				maxTaskCount: 1000
+			},
+			async () => {
+				// Date.now() in fake timers starts at 0, advance to realistic values
+				await timeout(60 * 60 * 1000);
+
+				const loadEstimator: ILoadEstimator = {
+					hasHighLoad: () => true
+				};
+				const ether = new Ether();
+				const aSocket = new NodeSocket(ether.a);
+				const a = new PersistentProtocol({ socket: aSocket, loadEstimator, sendKeepAlive: false });
+				const aMessages = new MessageStream(a);
+				const bSocket = new NodeSocket(ether.b);
+				const b = new PersistentProtocol({ socket: bSocket, loadEstimator, sendKeepAlive: false });
+				const bMessages = new MessageStream(b);
+
+				// never send acks from B
+				b.pauseSocketWriting();
+
+				// send a message A -> B to trigger _recvAckCheck scheduling
+				a.send(VSBuffer.fromString('a1'));
+
+				let timeoutFired = false;
+				const socketTimeoutListener = a.onSocketTimeout(() => {
+					timeoutFired = true;
+				});
+
+				// wait past the soft timeout (20s) — should NOT fire because of high load
+				await timeout(ProtocolConstants.TimeoutTime + 1000);
+				assert.strictEqual(timeoutFired, false);
+
+				// wait past the hard timeout (60s total) — MUST fire despite high load
+				await timeout(ProtocolConstants.TimeoutTimeHardLimit - ProtocolConstants.TimeoutTime);
+				assert.strictEqual(timeoutFired, true);
+
+				socketTimeoutListener.dispose();
+				aMessages.dispose();
+				bMessages.dispose();
+				a.dispose();
+				b.dispose();
+			}
+		);
+	});
+
+	test('pause auto-resumes after hard timeout', async () => {
+		await runWithFakedTimers(
+			{
+				useFakeTimers: true,
+				useSetImmediate: true,
+				maxTaskCount: 1000
+			},
+			async () => {
+				const loadEstimator: ILoadEstimator = {
+					hasHighLoad: () => false
+				};
+				const ether = new Ether();
+				const aSocket = new NodeSocket(ether.a);
+				const a = new PersistentProtocol({ socket: aSocket, loadEstimator });
+				const aMessages = new MessageStream(a);
+				const bSocket = new NodeSocket(ether.b);
+				const b = new PersistentProtocol({ socket: bSocket, loadEstimator });
+				const bMessages = new MessageStream(b);
+
+				// send one message A -> B to confirm connection works
+				a.send(VSBuffer.fromString('a1'));
+				const a1 = await bMessages.waitForOne();
+				assert.strictEqual(a1.toString(), 'a1');
+
+				// ask A to pause writing (but never send resume)
+				b.sendPause();
+
+				// wait for the Pause message to propagate through the socket
+				await timeout(1);
+
+				// send a message A -> B (this should be blocked at A)
+				a.send(VSBuffer.fromString('a2'));
+
+				// wait less than the hard timeout — message should still be blocked
+				await timeout(2 * ProtocolConstants.AcknowledgeTime);
+				assert.strictEqual(a.unacknowledgedCount, 1);
+
+				// wait past the hard timeout — auto-resume should kick in
+				await timeout(ProtocolConstants.TimeoutTimeHardLimit);
+
+				// check that B receives the message
+				const a2 = await bMessages.waitForOne();
+				assert.strictEqual(a2.toString(), 'a2');
+
+				aMessages.dispose();
+				bMessages.dispose();
+				a.dispose();
+				b.dispose();
+			}
+		);
+	});
 });
 
 flakySuite('IPC, create handle', () => {
