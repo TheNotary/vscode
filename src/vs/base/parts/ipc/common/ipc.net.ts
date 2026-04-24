@@ -293,6 +293,13 @@ export const enum ProtocolConstants {
 	 */
 	TimeoutTime = 20000, // 20 seconds
 	/**
+	 * Absolute upper bound for unacknowledged messages. If a message has been
+	 * unacknowledged for this long, the connection is considered timed out
+	 * regardless of CPU load. This prevents infinite deferral when
+	 * LoadEstimator.hasHighLoad() stays true indefinitely.
+	 */
+	TimeoutTimeHardLimit = 60000, // 60 seconds
+	/**
 	 * If there is no reconnection within this time-frame, consider the connection permanently closed...
 	 */
 	ReconnectionGraceTime = 3 * 60 * 60 * 1000, // 3hrs
@@ -415,6 +422,7 @@ class ProtocolWriter {
 
 	private _isDisposed: boolean;
 	private _isPaused: boolean;
+	private _pauseTimeout: Timeout | null;
 	private readonly _socket: ISocket;
 	private _data: VSBuffer[];
 	private _totalLength: number;
@@ -423,6 +431,7 @@ class ProtocolWriter {
 	constructor(socket: ISocket) {
 		this._isDisposed = false;
 		this._isPaused = false;
+		this._pauseTimeout = null;
 		this._socket = socket;
 		this._data = [];
 		this._totalLength = 0;
@@ -430,6 +439,10 @@ class ProtocolWriter {
 	}
 
 	public dispose(): void {
+		if (this._pauseTimeout) {
+			clearTimeout(this._pauseTimeout);
+			this._pauseTimeout = null;
+		}
 		try {
 			this.flush();
 		} catch (err) {
@@ -450,9 +463,20 @@ class ProtocolWriter {
 
 	public pause(): void {
 		this._isPaused = true;
+		if (this._pauseTimeout) {
+			clearTimeout(this._pauseTimeout);
+		}
+		this._pauseTimeout = setTimeout(() => {
+			this._pauseTimeout = null;
+			this.resume();
+		}, ProtocolConstants.TimeoutTimeHardLimit);
 	}
 
 	public resume(): void {
+		if (this._pauseTimeout) {
+			clearTimeout(this._pauseTimeout);
+			this._pauseTimeout = null;
+		}
 		this._isPaused = false;
 		this._scheduleWriting();
 	}
@@ -1145,7 +1169,7 @@ export class PersistentProtocol implements IMessagePassingProtocol {
 			// and a long time since we received some data
 
 			// But this might be caused by the event loop being busy and failing to read messages
-			if (!this._loadEstimator.hasHighLoad()) {
+			if (!this._loadEstimator.hasHighLoad() || timeSinceOldestUnacknowledgedMsg >= ProtocolConstants.TimeoutTimeHardLimit) {
 				// Trash the socket
 				this._lastSocketTimeoutTime = Date.now();
 				this._onSocketTimeout.fire({
