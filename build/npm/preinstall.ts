@@ -111,7 +111,33 @@ function hasSupportedVisualStudioVersion() {
 		}
 	}
 
-	return availableVersions.length;
+	if (availableVersions.length > 0) {
+		return availableVersions.length;
+	}
+
+	// Fall back to vswhere.exe, the canonical tool for locating Visual Studio installations.
+	// This handles non-standard install paths and newer runner configurations (e.g. windows-2025).
+	const vswherePaths = [
+		'C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe',
+		'C:\\Program Files\\Microsoft Visual Studio\\Installer\\vswhere.exe',
+	];
+	for (const vswherePath of vswherePaths) {
+		if (fs.existsSync(vswherePath)) {
+			try {
+				const result = child_process.execSync(
+					`"${vswherePath}" -latest -requires Microsoft.VisualCpp.Tools.HostX86.TargetX64 -property installationPath`,
+					{ encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+				).trim();
+				if (result) {
+					return 1;
+				}
+			} catch {
+				// vswhere found but no matching installation; continue
+			}
+		}
+	}
+
+	return 0;
 }
 
 function installHeaders() {
