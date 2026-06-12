@@ -76,6 +76,26 @@ if (process.arch !== os.arch()) {
 }
 
 function hasSupportedVisualStudioVersion() {
+	// Try vswhere.exe first — the official Microsoft tool for VS discovery,
+	// present on all machines that have VS or Build Tools installed.
+	const programFiles86Path = process.env['ProgramFiles(x86)'];
+	if (programFiles86Path) {
+		const vswherePath = path.join(programFiles86Path, 'Microsoft Visual Studio', 'Installer', 'vswhere.exe');
+		if (fs.existsSync(vswherePath)) {
+			try {
+				const result = child_process.execSync(
+					`"${vswherePath}" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`,
+					{ encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+				).trim();
+				if (result) {
+					return 1;
+				}
+			} catch {
+				// vswhere found nothing matching; fall through to manual path checks
+			}
+		}
+	}
+
 	// Translated over from
 	// https://source.chromium.org/chromium/chromium/src/+/master:build/vs_toolchain.py;l=140-175
 	const supportedVersions = ['2022', '2019'];
@@ -90,7 +110,6 @@ function hasSupportedVisualStudioVersion() {
 		}
 
 		// Check default installation paths
-		const programFiles86Path = process.env['ProgramFiles(x86)'];
 		const programFiles64Path = process.env['ProgramFiles'];
 
 		const vsTypes = ['Enterprise', 'Professional', 'Community', 'Preview', 'BuildTools', 'IntPreview'];
