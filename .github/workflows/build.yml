@@ -271,6 +271,17 @@ jobs:
         if: steps.cache-node-modules.outputs.cache-hit == 'true'
         run: 7z x .build/node_modules_cache/cache.7z -aoa
 
+      - name: Find Visual Studio
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (Test-Path $vswhere) {
+            $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+            if ($vsPath) {
+              echo "vs2022_install=$vsPath" >> $env:GITHUB_ENV
+            }
+          }
+
       - name: Install dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
         run: |
@@ -386,6 +397,17 @@ jobs:
       - name: Extract node_modules cache
         if: steps.cache-node-modules.outputs.cache-hit == 'true'
         run: 7z x .build/node_modules_cache/cache.7z -aoa
+
+      - name: Find Visual Studio
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (Test-Path $vswhere) {
+            $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+            if ($vsPath) {
+              echo "vs2022_install=$vsPath" >> $env:GITHUB_ENV
+            }
+          }
 
       - name: Install dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
