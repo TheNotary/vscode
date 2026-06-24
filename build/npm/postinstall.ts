@@ -174,12 +174,13 @@ function getNpmrcConfigKeys(npmrcPath: string): string[] {
 	return keys;
 }
 
-function clearInheritedNpmrcConfig(dir: string, env: NodeJS.ProcessEnv): void {
-	const dirNpmrcPath = path.join(root, dir, '.npmrc');
-	if (fs.existsSync(dirNpmrcPath)) {
-		return;
-	}
-
+function clearInheritedNpmrcConfig(env: NodeJS.ProcessEnv): void {
+	// Always clear root-level npm config env vars (e.g. npm_config_target=42.3.0,
+	// npm_config_runtime=electron) regardless of whether the directory has its own
+	// .npmrc. A directory's .npmrc file only adds or overrides configs via file; it
+	// does NOT suppress inherited npm_config_* environment variables, so extensions
+	// with a .npmrc would otherwise still receive Electron-specific settings that
+	// cause native modules like sqlite3 to target the wrong runtime.
 	for (const key of rootNpmrcConfigKeys) {
 		const envKey = `npm_config_${key.replace(/-/g, '_')}`;
 		delete env[envKey];
@@ -298,7 +299,7 @@ async function main() {
 		const taskDir = dir;
 		parallelTasks.push(() => {
 			const env = { ...process.env };
-			clearInheritedNpmrcConfig(taskDir, env);
+			clearInheritedNpmrcConfig(env);
 			return npmInstallAsync(taskDir, { env });
 		});
 	}
