@@ -145,8 +145,31 @@ function hasSupportedVisualStudioVersion() {
 
 function installHeaders() {
 	const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+
+	// Strip out project-specific npm config env vars that the outer `npm ci` set from
+	// .npmrc (e.g. runtime=electron, disturl, target). These are Electron-specific and do
+	// not apply to the plain node-gyp package installation in the gyp/ sub-directory.
+	// Passing them to npm 11+ causes an immediate crash (STATUS_STACK_BUFFER_OVERRUN)
+	// because npm 11 validates unknown config values more strictly than older versions.
+	const projectNpmConfigKeys = new Set([
+		'npm_config_disturl',
+		'npm_config_target',
+		'npm_config_runtime',
+		'npm_config_build_from_source',
+		'npm_config_arch',
+		'npm_config_ms_build_id',
+		'npm_config_timeout',
+		'npm_config_ignore_scripts',
+	]);
+	const env: NodeJS.ProcessEnv = {};
+	for (const [key, val] of Object.entries(process.env)) {
+		if (!projectNpmConfigKeys.has(key.toLowerCase())) {
+			env[key] = val;
+		}
+	}
+
 	child_process.execSync(`${npm} ${process.env.npm_command || 'ci'}`, {
-		env: process.env,
+		env,
 		cwd: path.join(import.meta.dirname, 'gyp'),
 		stdio: 'inherit'
 	});
