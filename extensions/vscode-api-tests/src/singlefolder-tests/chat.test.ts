@@ -7,7 +7,7 @@ import * as assert from 'assert';
 import * as fs from 'fs';
 import { join } from 'path';
 import 'mocha';
-import { ChatContext, ChatRequest, ChatRequestTurn, ChatRequestTurn2, ChatResult, Disposable, env, Event, EventEmitter, chat, commands, lm, UIKind } from 'vscode';
+import { ChatContext, ChatRequest, ChatRequestTurn, ChatRequestTurn2, ChatResult, Disposable, Uri, env, Event, EventEmitter, chat, commands, lm, UIKind, window } from 'vscode';
 import { DeferredPromise, asPromise, assertNoRpc, closeAllEditors, delay, disposeAll } from '../utils';
 
 // TODO: this now became flaky with built-in copilot
@@ -217,6 +217,29 @@ suite('chat', () => {
 
 		// Title provider was not called again
 		assert.strictEqual(calls, 1);
+	});
+
+	test('openChatSession opens an existing session resource', async () => {
+		await commands.executeCommand('workbench.action.chat.newChat');
+
+		let sessionResource = window.activeChatPanelSessionResource;
+		for (let i = 0; i < 20 && !sessionResource; i++) {
+			await delay(50);
+			sessionResource = window.activeChatPanelSessionResource;
+		}
+
+		assert.ok(sessionResource);
+		if (!sessionResource) {
+			return;
+		}
+
+		const opened = await window.openChatSession(sessionResource);
+		assert.strictEqual(opened, true);
+	});
+
+	test('openChatSession returns false for unknown session resource', async () => {
+		const opened = await window.openChatSession(Uri.parse('no-such-chat-session-scheme:/missing-session'));
+		assert.strictEqual(opened, false);
 	});
 
 	test('can access node-pty module', async function () {

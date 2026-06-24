@@ -394,6 +394,13 @@ declare module 'vscode' {
 		export const activeChatPanelSessionResource: Uri | undefined;
 
 		/**
+		 * Opens an existing chat session in the chat panel.
+		 *
+		 * Returns `true` if the session was opened, otherwise `false`.
+		 */
+		export function openChatSession(sessionResource: Uri): Thenable<boolean>;
+
+		/**
 		 * An event that fires when the active chat panel session resource changes.
 		 */
 		export const onDidChangeActiveChatPanelSessionResource: Event<Uri | undefined>;
