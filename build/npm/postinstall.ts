@@ -190,6 +190,21 @@ function clearInheritedNpmrcConfig(env: NodeJS.ProcessEnv): void {
 	env['npm_config_runtime'] = 'node';
 	env['npm_config_target'] = process.versions.node;
 
+	// Reset the CPU architecture to match the current Node.js process.
+	//
+	// On Windows arm64 CI, the outer `npm ci` is invoked with
+	// npm_config_arch=arm64 so that the main VS Code native modules are
+	// built for arm64. Extension subdirectories inherit that env var and
+	// npm therefore skips optional packages whose `cpu` field includes only
+	// "x64" (e.g. @esbuild/win32-x64 that tsx requires).  When tsx then
+	// runs as the extension's postinstall script, it cannot find its x64
+	// esbuild helper and crashes the npm process with STATUS_STACK_BUFFER_OVERRUN
+	// (exit code 3221226505).  Resetting to process.arch (x64 here) ensures
+	// that the x64 optional packages are installed so that build-time tools
+	// (tsx, esbuild, vitest, etc.) can run correctly inside the x64 Node.js
+	// process.
+	env['npm_config_arch'] = process.arch;
+
 	// Remove remaining Electron-specific vars that have no Node.js equivalent.
 	for (const key of rootNpmrcConfigKeys) {
 		if (key !== 'runtime' && key !== 'target') {
