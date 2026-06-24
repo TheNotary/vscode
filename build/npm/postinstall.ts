@@ -175,16 +175,35 @@ function getNpmrcConfigKeys(npmrcPath: string): string[] {
 }
 
 function clearInheritedNpmrcConfig(env: NodeJS.ProcessEnv): void {
-	// Always clear root-level npm config env vars (e.g. npm_config_target=42.3.0,
-	// npm_config_runtime=electron) regardless of whether the directory has its own
-	// .npmrc. A directory's .npmrc file only adds or overrides configs via file; it
-	// does NOT suppress inherited npm_config_* environment variables, so extensions
-	// with a .npmrc would otherwise still receive Electron-specific settings that
-	// cause native modules like sqlite3 to target the wrong runtime.
+	// Override Electron-specific npm config env vars so native modules in
+	// extension directories build against Node.js rather than Electron.
+	//
+	// Merely deleting these vars is insufficient: npm re-reads the root .npmrc
+	// from disk when running in a child directory (npm walks up to the project
+	// root), so 'target=42.3.0' and 'runtime=electron' would be restored from
+	// the file. Environment variables take precedence over .npmrc, so we must
+	// SET them to Node.js-appropriate values rather than delete them.
+	//
+	// With the correct Node.js target, prebuild-install resolves the matching
+	// N-API version (e.g. Node 24 → napi v9) and finds a prebuilt binary,
+	// avoiding the need to compile from source entirely.
+	env['npm_config_runtime'] = 'node';
+	env['npm_config_target'] = process.versions.node;
+
+	// Remove remaining Electron-specific vars that have no Node.js equivalent.
 	for (const key of rootNpmrcConfigKeys) {
-		const envKey = `npm_config_${key.replace(/-/g, '_')}`;
-		delete env[envKey];
+		if (key !== 'runtime' && key !== 'target') {
+			const envKey = `npm_config_${key.replace(/-/g, '_')}`;
+			delete env[envKey];
+		}
 	}
+
+	// Use the bundled node-gyp (which knows about VS 2026 and the current Node.js)
+	// as a fallback in case prebuild-install cannot find a prebuilt binary.
+	env['npm_config_node_gyp'] =
+		process.platform === 'win32'
+			? path.join(import.meta.dirname, 'gyp', 'node_modules', '.bin', 'node-gyp.cmd')
+			: path.join(import.meta.dirname, 'gyp', 'node_modules', '.bin', 'node-gyp');
 }
 
 function ensureAgentHarnessLink(sourceRelativePath: string, linkPath: string): 'existing' | 'junction' | 'symlink' | 'hard link' {
