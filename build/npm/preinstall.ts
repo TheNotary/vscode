@@ -76,7 +76,30 @@ if (process.arch !== os.arch()) {
 }
 
 function hasSupportedVisualStudioVersion() {
-	// Translated over from
+	// Try vswhere first — it's the canonical tool for detecting VS installations
+	// and handles non-standard install paths, newer VS versions, and BuildTools.
+	// vswhere is always present on GitHub-hosted Windows runners and any machine
+	// that has the VS Installer installed.
+	const vswherePath = path.join(
+		process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)',
+		'Microsoft Visual Studio', 'Installer', 'vswhere.exe'
+	);
+	if (fs.existsSync(vswherePath)) {
+		try {
+			const result = child_process.execFileSync(
+				vswherePath,
+				['-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'],
+				{ encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+			).trim();
+			if (result) {
+				return true;
+			}
+		} catch {
+			// vswhere failed — fall through to path-based detection
+		}
+	}
+
+	// Fallback: path-based detection translated over from
 	// https://source.chromium.org/chromium/chromium/src/+/master:build/vs_toolchain.py;l=140-175
 	const supportedVersions = ['2022', '2019'];
 
