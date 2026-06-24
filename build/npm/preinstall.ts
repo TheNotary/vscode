@@ -63,7 +63,7 @@ if (process.platform === 'win32') {
 	if (!hasSupportedVisualStudioVersion()) {
 		console.error('\x1b[1;31m*** Invalid C/C++ Compiler Toolchain. Please check https://github.com/microsoft/vscode/wiki/How-to-Contribute#prerequisites.\x1b[0;0m');
 		console.error('\x1b[1;31m*** If you have Visual Studio installed in a custom location, you can specify it via the environment variable:\x1b[0;0m');
-		console.error('\x1b[1;31m*** set vs2022_install=<path> (or vs2019_install for older versions)\x1b[0;0m');
+		console.error('\x1b[1;31m*** set vs2022_install=<path> (or vs2019_install for older versions, vs18_install for VS 2026)\x1b[0;0m');
 		throw new Error();
 	}
 }
@@ -80,28 +80,34 @@ function hasSupportedVisualStudioVersion() {
 	// and handles non-standard install paths, newer VS versions, and BuildTools.
 	// vswhere is always present on GitHub-hosted Windows runners and any machine
 	// that has the VS Installer installed.
-	const vswherePath = path.join(
-		process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)',
-		'Microsoft Visual Studio', 'Installer', 'vswhere.exe'
-	);
-	if (fs.existsSync(vswherePath)) {
-		try {
-			const result = child_process.execFileSync(
-				vswherePath,
-				['-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'],
-				{ encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
-			).trim();
-			if (result) {
-				return true;
+	// Check both ProgramFiles(x86) (VS 2017-2022) and ProgramFiles (VS 2026+)
+	// since newer VS versions ship a 64-bit installer.
+	const vswhereCandidates = [
+		path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Microsoft Visual Studio', 'Installer', 'vswhere.exe'),
+		path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'Microsoft Visual Studio', 'Installer', 'vswhere.exe'),
+	];
+	for (const vswherePath of vswhereCandidates) {
+		if (fs.existsSync(vswherePath)) {
+			try {
+				const result = child_process.execFileSync(
+					vswherePath,
+					['-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'],
+					{ encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+				).trim();
+				if (result) {
+					return true;
+				}
+			} catch {
+				// vswhere failed — fall through to path-based detection
 			}
-		} catch {
-			// vswhere failed — fall through to path-based detection
+			break;
 		}
 	}
 
 	// Fallback: path-based detection translated over from
 	// https://source.chromium.org/chromium/chromium/src/+/master:build/vs_toolchain.py;l=140-175
-	const supportedVersions = ['2022', '2019'];
+	// '18' is the VS 2026 internal version folder name (VS 2022 uses '2022', VS 2019 uses '2019').
+	const supportedVersions = ['18', '2022', '2019'];
 
 	const availableVersions = [];
 	for (const version of supportedVersions) {
