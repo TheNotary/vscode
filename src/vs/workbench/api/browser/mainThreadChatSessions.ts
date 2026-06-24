@@ -21,7 +21,7 @@ import { IInstantiationService } from '../../../platform/instantiation/common/in
 import { ILogService } from '../../../platform/log/common/log.js';
 import { hasValidDiff, IAgentSession } from '../../contrib/chat/browser/agentSessions/agentSessionsModel.js';
 import { IAgentSessionsService } from '../../contrib/chat/browser/agentSessions/agentSessionsService.js';
-import { IChatWidgetService, isIChatViewViewContext } from '../../contrib/chat/browser/chat.js';
+import { ChatViewPaneTarget, IChatWidgetService, isIChatViewViewContext } from '../../contrib/chat/browser/chat.js';
 import { getInProgressSessionDescription } from '../../contrib/chat/browser/chatSessions/chatSessionDescription.js';
 import { getSessionStatusForModel } from '../../contrib/chat/browser/chatSessions/chatSessions.contribution.js';
 import { IChatEditorOptions } from '../../contrib/chat/browser/widgetHosts/editor/chatEditor.js';
