@@ -7,7 +7,7 @@ import * as assert from 'assert';
 import * as fs from 'fs';
 import { join } from 'path';
 import 'mocha';
-import { ChatContext, ChatRequest, ChatRequestTurn, ChatRequestTurn2, ChatResult, Disposable, env, Event, EventEmitter, chat, commands, lm, UIKind } from 'vscode';
+import { ChatContext, ChatRequest, ChatRequestTurn, ChatRequestTurn2, ChatResult, Disposable, Uri, env, Event, EventEmitter, chat, commands, lm, UIKind, window } from 'vscode';
 import { DeferredPromise, asPromise, assertNoRpc, closeAllEditors, delay, disposeAll } from '../utils';
 
 // TODO: this now became flaky with built-in copilot
