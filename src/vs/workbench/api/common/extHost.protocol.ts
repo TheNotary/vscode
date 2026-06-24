@@ -3859,6 +3859,7 @@ export interface IChatSessionItemsChange {
 }
 
 export interface MainThreadChatSessionsShape extends IDisposable {
+	$openChatSession(sessionResource: UriComponents): Promise<boolean>;
 	$registerChatSessionItemController(controllerHandle: number, chatSessionType: string, supportsResolve: boolean): void;
 	$updateChatSessionItemControllerCapabilities(controllerHandle: number, supportsResolve: boolean): void;
 	$unregisterChatSessionItemController(controllerHandle: number): void;
