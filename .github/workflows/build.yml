@@ -79,7 +79,9 @@ jobs:
             # tracks upstream tags). If no matching tag is reachable from HEAD,
             # fall back to querying microsoft/vscode for the latest stable
             # release tag and resolve it via the GitHub API.
-            TAG=$(git describe --tags --abbrev=0 --match '[0-9]*.[0-9]*.[0-9]*' HEAD 2>/dev/null || true)
+            # --exclude '*-*' skips fork-specific tags like '1.126.1-custom';
+            # real upstream release tags are always bare N.N.N.
+            TAG=$(git describe --tags --abbrev=0 --match '[0-9]*.[0-9]*.[0-9]*' --exclude '*-*' HEAD 2>/dev/null || true)
             if [ -n "$TAG" ]; then
               SHA=$(git rev-list -n 1 "$TAG")
               echo "Resolved upstream tag $TAG -> $SHA (from local refs)"

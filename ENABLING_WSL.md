@@ -373,8 +373,43 @@ distribution refuses to cooperate with a non-Microsoft client.
 | Build output path (Linux) | `../VSCode-linux-<arch>/` |
 | Build output path (macOS) | `../VSCode-darwin-<arch>/` |
 | WSL extension server-spawn shim | `wslCode.sh` (shipped by the WSL extension; line 60 invokes `$VSCODE_REMOTE_BIN/$COMMIT/bin/remote-cli/$APP_NAME`) |
+| Patch existing install (automated) | `scripts/patch-local-wsl.ps1` |
+| Resolve upstream commit (build-time) | `scripts/resolve-upstream-commit.ps1` / `.sh` |
 
 ## Patching an already-built local install
+
+**Automated (recommended):** Run the patch script from the repo root:
+
+```pwsh
+.\scripts\patch-local-wsl.ps1
+# Or with explicit path and WSL cleanup:
+.\scripts\patch-local-wsl.ps1 -InstallPath C:\l\code-oss-win32-arm64 -CleanWSLServer
+```
+
+The script resolves the upstream commit, patches `product.json`, the launcher,
+and the WSL extension in one pass. It is idempotent — safe to re-run after
+upstream version bumps. See `scripts/patch-local-wsl.ps1` for all parameters.
+
+**For local production builds** (preventing the issue at build time):
+
+```pwsh
+# Dot-source to export BUILD_SOURCEVERSION into the current session:
+. .\scripts\resolve-upstream-commit.ps1
+# Then build as usual:
+npm run gulp "vscode-win32-arm64-min-ci"
+```
+
+Or on Linux/macOS:
+
+```bash
+source scripts/resolve-upstream-commit.sh
+npm run gulp "vscode-linux-x64-min-ci"
+```
+
+---
+
+<details>
+<summary><b>Manual steps</b> (for reference — prefer the script above)</summary>
 
 If you need to fix a pre-existing install (e.g. `C:\l\code-oss-win32-arm64\`)
 without rebuilding, seven things need attention. (1)–(3) match the build-time
@@ -416,6 +451,8 @@ workspace-trust override.
 7. Wipe stale state on the WSL side after changing extension scripts:
    `rm -rf ~/.vscode-server-oss` (or just the per-commit subdir) so the
    patched `wslDownload.sh` re-applies on the next connect.
+
+</details>
 
 ## Verifying
 
