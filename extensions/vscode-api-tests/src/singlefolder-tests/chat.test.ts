@@ -242,6 +242,29 @@ suite('chat', () => {
 		assert.strictEqual(opened, false);
 	});
 
+	test('sendChatMessage sends a message to an existing session', async () => {
+		await commands.executeCommand('workbench.action.chat.newChat');
+
+		let sessionResource = window.activeChatPanelSessionResource;
+		for (let i = 0; i < 20 && !sessionResource; i++) {
+			await delay(50);
+			sessionResource = window.activeChatPanelSessionResource;
+		}
+
+		assert.ok(sessionResource);
+		if (!sessionResource) {
+			return;
+		}
+
+		const sent = await window.sendChatMessage(sessionResource, 'Hello from the API');
+		assert.strictEqual(sent, true);
+	});
+
+	test('sendChatMessage returns false for unknown session resource', async () => {
+		const sent = await window.sendChatMessage(Uri.parse('no-such-chat-session-scheme:/missing-session'), 'Hello');
+		assert.strictEqual(sent, false);
+	});
+
 	test('can access node-pty module', async function () {
 		// Required for copilot cli in chat extension.
 		if (env.uiKind === UIKind.Web) {

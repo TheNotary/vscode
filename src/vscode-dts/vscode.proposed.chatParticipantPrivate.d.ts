@@ -401,6 +401,14 @@ declare module 'vscode' {
 		export function openChatSession(sessionResource: Uri): Thenable<boolean>;
 
 		/**
+		 * Sends a message to an existing chat session without requiring
+		 * the session to be open or focused in the UI.
+		 *
+		 * Returns `true` if the message was sent, otherwise `false`.
+		 */
+		export function sendChatMessage(sessionResource: Uri, message: string): Thenable<boolean>;
+
+		/**
 		 * An event that fires when the active chat panel session resource changes.
 		 */
 		export const onDidChangeActiveChatPanelSessionResource: Event<Uri | undefined>;
