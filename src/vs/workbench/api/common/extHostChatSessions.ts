@@ -427,6 +427,15 @@ export class ExtHostChatSessions extends Disposable implements ExtHostChatSessio
 		});
 	}
 
+	openChatSession(sessionResource: vscode.Uri): Promise<boolean> {
+		return this._proxy.$openChatSession(sessionResource);
+	}
+
+	sendChatMessage(sessionResource: vscode.Uri, message: string): Promise<boolean> {
+		return this._proxy.$sendChatMessage(sessionResource, message);
+	}
+
+
 	registerChatSessionItemProvider(extension: IExtensionDescription, chatSessionType: string, provider: vscode.ChatSessionItemProvider): vscode.Disposable {
 		// The legacy provider api is implemented using the new controller API on the backend
 		const controllerHandle = this._itemControllerHandlePool++;
