@@ -227,6 +227,53 @@ suite('chat', () => {
 		assert.strictEqual(calls, 1);
 	});
 
+	test('openChatSession opens an existing session resource', async () => {
+		await commands.executeCommand('workbench.action.chat.newChat');
+
+		let sessionResource = window.activeChatPanelSessionResource;
+		for (let i = 0; i < 20 && !sessionResource; i++) {
+			await delay(50);
+			sessionResource = window.activeChatPanelSessionResource;
+		}
+
+		assert.ok(sessionResource);
+		if (!sessionResource) {
+			return;
+		}
+
+		const opened = await window.openChatSession(sessionResource);
+		assert.strictEqual(opened, true);
+	});
+
+	test('openChatSession returns false for unknown session resource', async () => {
+		const opened = await window.openChatSession(Uri.parse('no-such-chat-session-scheme:/missing-session'));
+		assert.strictEqual(opened, false);
+	});
+
+	test('sendChatMessage sends a message to an existing session', async () => {
+		await commands.executeCommand('workbench.action.chat.newChat');
+
+		let sessionResource = window.activeChatPanelSessionResource;
+		for (let i = 0; i < 20 && !sessionResource; i++) {
+			await delay(50);
+			sessionResource = window.activeChatPanelSessionResource;
+		}
+
+		assert.ok(sessionResource);
+		if (!sessionResource) {
+			return;
+		}
+
+		const sent = await window.sendChatMessage(sessionResource, 'Hello from the API');
+		assert.strictEqual(sent, true);
+	});
+
+	test('sendChatMessage returns false for unknown session resource', async () => {
+		const sent = await window.sendChatMessage(Uri.parse('no-such-chat-session-scheme:/missing-session'), 'Hello');
+		assert.strictEqual(sent, false);
+	});
+
+
 	test('can access node-pty module', async function () {
 		// Required for copilot cli in chat extension.
 		if (env.uiKind === UIKind.Web) {
