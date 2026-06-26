@@ -741,6 +741,23 @@ export class MainThreadChatSessions extends Disposable implements MainThreadChat
 		return this._sessionTypeToHandle.get(chatSessionType);
 	}
 
+	async $openChatSession(sessionResource: UriComponents): Promise<boolean> {
+		const resource = URI.revive(sessionResource);
+		const widget = await this._chatWidgetService.openSession(resource, ChatViewPaneTarget);
+		return !!widget;
+	}
+
+	async $sendChatMessage(sessionResource: UriComponents, message: string): Promise<boolean> {
+		const resource = URI.revive(sessionResource);
+		const ref = await this._chatService.acquireOrLoadSession(resource, ChatAgentLocation.Chat, CancellationToken.None, 'ExtHost#sendChatMessage');
+		if (!ref) {
+			return false;
+		}
+		const result = await this._chatService.sendRequest(resource, message);
+		return result.kind === 'sent';
+	}
+
+
 	$registerChatSessionItemController(handle: number, chatSessionType: string, supportsResolve: boolean): void {
 		const disposables = new DisposableStore();
 
