@@ -1,6 +1,8 @@
-# Local Build Guide — Code OSS
+# Local Install and Build Guide — Code OSS
 
-Quick reference for building, running, and testing VS Code (Code OSS) from source.
+Quick reference for building, running, and testing VS Code (Code OSS) from source, concerned mostly with builds on Windows with WSL support.
+
+Please note that if you're an agent, this document is not always up-to-date so you must validate any assertions here by reading source files.
 
 ---
 
@@ -9,13 +11,50 @@ Quick reference for building, running, and testing VS Code (Code OSS) from sourc
 | Requirement | Notes |
 |---|---|
 | **Node.js** | Version pinned in `.nvmrc` / `remote/.npmrc` |
-| **npm** | Ships with Node |
 | **Python 3** | For native module compilation |
 | **C/C++ toolchain** | `build-essential` on Linux, Xcode CLT on macOS, VS Build Tools on Windows |
-| **Git** | Already available in the dev container |
-| **Linux extras** | `libx11-dev libxkbfile-dev libsecret-1-dev libkrb5-dev` |
 
-In the dev container, all prerequisites are pre-installed.
+In the dev container, all prerequisites are pre-installed,but... last I checked, the dev container is using linux and so isn't suitable for building windows binaries (unconfirmed).
+
+---
+
+## Installing from Github Action Builds
+
+Currently, the `build.yml` workflow produces a build of Code OSS along with the REH server required on WSL.  The install method is to download the artifacts from the latest successful build of main and extract them to a folder you'll put in your path (I hope ENVs are documented elsewhere...).
+
+For windows on arm, https://github.com/TheNotary/vscode/actions/runs/28287257204
+
+1. Rename the prior install from `C:\l\code-oss-win32` to `C:\l\code-oss-win32-old`
+
+2. Download `code-oss-win32-arm64-1.126.0.zip` from the GH Actions build and extract the nested zips to `C:\l\code-oss-win32`
+
+3. Download `code-oss-server-win32-arm64-1.126.0.zip` and extract this on the WSL side to `~/.vscode-server/bin/SHA` where SHA will be listed in product.json.
+
+4. Rename `~/.vscode-server/bin/SHA/bin/remote-cli/code-oss` to `~/.vscode-server/bin/SHA/bin/remote-cli/code`
+
+You should be good-to-go as long as copilot did it's part maintaining the build.
+
+---
+
+## Local Production Build Quickstart (From Source)
+
+NOTE: I haven't finished this because I don't like leaving copilot unattended on my local for hours at a time with the idea that it should be making environment configuration "improvements" especially on arm64-based devices.
+
+To produce a fully bundled and minified build equivalent to the CI pipeline:
+
+```bash
+npm ci
+npm run core-ci
+```
+
+This single command runs the same compilation pipeline as Azure DevOps CI:
+1. Copies codicons and compiles all extensions (non-native + copilot + media)
+2. Type-checks with tsgo (no emit)
+3. Transpiles source to `out-build/`
+4. Bundles and minifies three targets **in parallel**:
+   - `out-vscode-min/` — Desktop (Electron) client
+   - `out-vscode-reh-min/` — Remote Extension Host server (WSL, SSH, tunnels)
+   - `out-vscode-reh-web-min/` — VS Code Web (browser workbench)
 
 ---
 
@@ -67,6 +106,55 @@ Skip this with `VSCODE_SKIP_PRELAUNCH=1 ./scripts/code.sh`.
 # Lightweight browser-only workbench
 ./scripts/code-web.sh --port 8080 --browser none
 ```
+
+---
+
+### Package for a Platform
+
+After `core-ci` completes, package into a runnable application with a platform-specific gulp task:
+
+```bash
+# Desktop client
+npm run gulp vscode-win32-x64-min-ci
+npm run gulp vscode-linux-x64-min-ci
+npm run gulp vscode-darwin-arm64-min-ci
+
+# REH server (for WSL / SSH / tunnels)
+npm run gulp vscode-reh-win32-x64-min-ci
+npm run gulp vscode-reh-linux-x64-min-ci
+npm run gulp vscode-reh-linux-arm64-min-ci
+
+# Web server (browser workbench)
+npm run gulp vscode-reh-web-linux-x64-min-ci
+```
+
+Output lands in sibling folders at the repo root:
+- `../VSCode-win32-x64/` (desktop client)
+- `../vscode-reh-linux-x64/` (REH server)
+- `../vscode-reh-web-linux-x64/` (web server)
+
+See the [Platform Targets](#platform-targets) table for all valid platform suffixes.
+
+### Recipe: Build a Patched REH Server for WSL
+
+If you need your source changes available in a WSL/SSH remote session:
+
+```bash
+# 1. Full production compile + bundle + minify
+npm run core-ci
+
+# 2. Package the REH server for your target platform
+npm run gulp vscode-reh-linux-x64-min-ci
+
+# 3. Deploy to your WSL server path (adjust commit hash as needed)
+SERVER_DIR="$HOME/.vscode-server-oss/bin/$(cat .build/commit)"
+mkdir -p "$SERVER_DIR"
+cp -r ../vscode-reh-linux-x64/* "$SERVER_DIR/"
+```
+
+Next time VS Code connects to WSL, it will use your patched server.
+
+> **Tip:** For an unminified debug-friendly server, use `npm run gulp vscode-reh-linux-x64` (without `-min-ci`) instead — this skips `core-ci` and runs the full pipeline standalone, but produces larger unminified output.
 
 ---
 
@@ -211,7 +299,10 @@ This spawns a local REH server via `scripts/code-server.sh`, sets up a TCP proxy
 | Compile extensions | `npm run gulp compile-extensions` |
 | Launch desktop | `./scripts/code.sh` |
 | Launch web server | `./scripts/code-server.sh` |
-| Build REH server | `npm run gulp vscode-reh-linux-x64` (or `linux-arm64` on ARM) |
+| Build REH server (dev) | `npm run gulp vscode-reh-linux-x64` (or `linux-arm64` on ARM) |
+| **Production build (CI equivalent)** | `npm run core-ci` |
+| Package desktop (after core-ci) | `npm run gulp vscode-{platform}-{arch}-min-ci` |
+| Package REH server (after core-ci) | `npm run gulp vscode-reh-{platform}-{arch}-min-ci` |
 | Download built-in extensions | `npm run download-builtin-extensions` |
 | Run unit tests | `./scripts/test.sh` |
 | Run unit tests (filtered) | `./scripts/test.sh --grep "pattern"` |

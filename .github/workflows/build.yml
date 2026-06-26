@@ -194,6 +194,10 @@ jobs:
       - name: Build client
         run: npm run gulp "vscode-linux-x64-min-ci"
 
+      - name: Build REH server
+        # Publish standalone remote/WSL server artifacts alongside client builds.
+        run: npm run gulp "vscode-reh-linux-x64-min-ci"
+
       - name: Archive portable build
         run: |
           set -e
@@ -201,6 +205,12 @@ jobs:
           cd ..
           tar --owner=0 --group=0 -cf "$GITHUB_WORKSPACE/.build/linux-x64-portable.tar" VSCode-linux-x64
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Archive REH server build
+        run: |
+          set -e
+          cd ..
+          tar --owner=0 --group=0 -cf "$GITHUB_WORKSPACE/.build/linux-x64-server.tar" vscode-server-linux-x64
 
       - name: Build .deb package
         run: |
@@ -217,6 +227,12 @@ jobs:
         with:
           name: code-oss-linux-x64-${{ env.VERSION }}.tar
           path: .build/linux-x64-portable.tar
+
+      - name: Upload REH server archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-oss-server-linux-x64-${{ env.VERSION }}.tar
+          path: .build/linux-x64-server.tar
 
       - name: Upload .deb package
         uses: actions/upload-artifact@v4
@@ -322,6 +338,9 @@ jobs:
       - name: Build client
         run: npm run gulp "vscode-win32-x64-min-ci"
 
+      - name: Build REH server
+        run: npm run gulp "vscode-reh-win32-x64-min-ci"
+
       - name: Patch launcher APP_NAME for upstream server compat
         run: |
           $launcher = "../VSCode-win32-x64/bin/code-oss"
@@ -340,11 +359,21 @@ jobs:
           echo "VERSION=$Version" >> $env:GITHUB_ENV
           Compress-Archive -Path "../VSCode-win32-x64/*" -DestinationPath ".build/code-oss-win32-x64.zip" -CompressionLevel NoCompression
 
+      - name: Archive REH server build
+        run: |
+          Compress-Archive -Path "../vscode-server-win32-x64/*" -DestinationPath ".build/code-oss-server-win32-x64.zip" -CompressionLevel NoCompression
+
       - name: Upload portable archive
         uses: actions/upload-artifact@v4
         with:
           name: code-oss-win32-x64-${{ env.VERSION }}.zip
           path: .build/code-oss-win32-x64.zip
+
+      - name: Upload REH server archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-oss-server-win32-x64-${{ env.VERSION }}.zip
+          path: .build/code-oss-server-win32-x64.zip
 
   # ────────────────────────────────────────────
   # Windows arm64 (cross-compiled on x64 host)
@@ -438,6 +467,9 @@ jobs:
       - name: Build client
         run: npm run gulp "vscode-win32-arm64-min-ci"
 
+      - name: Build REH server
+        run: npm run gulp "vscode-reh-win32-arm64-min-ci"
+
       - name: Patch launcher APP_NAME for upstream server compat
         run: |
           $launcher = "../VSCode-win32-arm64/bin/code-oss"
@@ -456,11 +488,21 @@ jobs:
           echo "VERSION=$Version" >> $env:GITHUB_ENV
           Compress-Archive -Path "../VSCode-win32-arm64/*" -DestinationPath ".build/code-oss-win32-arm64.zip" -CompressionLevel NoCompression
 
+      - name: Archive REH server build
+        run: |
+          Compress-Archive -Path "../vscode-server-win32-arm64/*" -DestinationPath ".build/code-oss-server-win32-arm64.zip" -CompressionLevel NoCompression
+
       - name: Upload portable archive
         uses: actions/upload-artifact@v4
         with:
           name: code-oss-win32-arm64-${{ env.VERSION }}.zip
           path: .build/code-oss-win32-arm64.zip
+
+      - name: Upload REH server archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-oss-server-win32-arm64-${{ env.VERSION }}.zip
+          path: .build/code-oss-server-win32-arm64.zip
 
   # ────────────────────────────────────────────
   # macOS arm64
@@ -551,6 +593,9 @@ jobs:
       - name: Build client
         run: npm run gulp "vscode-darwin-arm64-min-ci"
 
+      - name: Build REH server
+        run: npm run gulp "vscode-reh-darwin-arm64-min-ci"
+
       - name: Archive .app bundle
         run: |
           set -e
@@ -559,11 +604,23 @@ jobs:
           cd ../VSCode-darwin-arm64
           zip -0 -Xry "$GITHUB_WORKSPACE/.build/code-oss-darwin-arm64.zip" .
 
+      - name: Archive REH server build
+        run: |
+          set -e
+          cd ../vscode-server-darwin-arm64
+          zip -0 -Xry "$GITHUB_WORKSPACE/.build/code-oss-server-darwin-arm64.zip" .
+
       - name: Upload .app archive
         uses: actions/upload-artifact@v4
         with:
           name: code-oss-darwin-arm64-${{ env.VERSION }}.zip
           path: .build/code-oss-darwin-arm64.zip
+
+      - name: Upload REH server archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-oss-server-darwin-arm64-${{ env.VERSION }}.zip
+          path: .build/code-oss-server-darwin-arm64.zip
 
   # ────────────────────────────────────────────
   # GitHub Release (on tag push only)
