@@ -126,6 +126,10 @@
 	"extensionEnabledApiProposals": {
 		"ms-vscode-remote.remote-wsl": [
 			"resolvers",
+			"tunnels",
+			"workspaceTrust",
+			"terminalDimensions",
+			"contribEditSessions",
 			"contribRemoteHelp",
 			"contribViewsRemote",
 			"telemetry"

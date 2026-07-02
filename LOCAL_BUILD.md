@@ -19,6 +19,18 @@ In the dev container, all prerequisites are pre-installed.
 
 ---
 
+## Local Production Build, up-to-date
+
+```bash
+npm ci
+
+npm run download-builtin-extensions
+npm run gulp core-ci
+npm run gulp vscode-win32-arm64-min-ci
+```
+
+Those commands *should* create VSCode-win32-arm64 in the repo root, which you can launch with `scripts/code.sh` (Linux/macOS) or `scripts\code.bat` (Windows).
+
 ## Local Production Build Quickstart (From Source)
 
 To produce a fully bundled and minified build equivalent to the CI pipeline:
