@@ -1,0 +1,314 @@
+name: Build Platform (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      os:
+        description: 'GitHub Actions runner image'
+        type: string
+        required: true
+      platform:
+        description: 'VS Code platform identifier (linux, win32, darwin)'
+        type: string
+        required: true
+      arch:
+        description: 'Architecture (x64, arm64)'
+        type: string
+        required: true
+      upstream_commit_sha:
+        description: 'Upstream VS Code commit SHA stamped into BUILD_SOURCEVERSION'
+        type: string
+        required: true
+      node_arch:
+        description: 'Value for npm_config_arch; leave empty to use host default'
+        type: string
+        default: ''
+      portable_archive_ext:
+        description: 'Archive extension for client + server artifacts: tar (Linux) or zip (Windows/macOS)'
+        type: string
+        default: 'zip'
+      install_build_tools:
+        description: 'Install Linux build tools via apt'
+        type: boolean
+        default: false
+      install_python_setuptools:
+        description: 'Install Python setuptools (macOS only)'
+        type: boolean
+        default: false
+      patch_launcher:
+        description: 'Patch APP_NAME in launcher shell script for upstream server compat (Windows only)'
+        type: boolean
+        default: false
+      build_inno_updater:
+        description: 'Build the Windows Inno Setup updater'
+        type: boolean
+        default: false
+      build_packages:
+        description: 'Build and upload .deb and .rpm packages (Linux only)'
+        type: boolean
+        default: false
+      deb_arch:
+        description: 'Debian architecture string used in package path (amd64, arm64)'
+        type: string
+        default: ''
+      rpm_arch:
+        description: 'RPM architecture string used in package path (x86_64, aarch64)'
+        type: string
+        default: ''
+
+jobs:
+  build:
+    name: ${{ inputs.platform }}-${{ inputs.arch }}
+    runs-on: ${{ inputs.os }}
+    env:
+      VSCODE_QUALITY: 'stable'
+      VSCODE_ARCH: ${{ inputs.arch }}
+      BUILD_SOURCEVERSION: ${{ inputs.upstream_commit_sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          lfs: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python setuptools
+        if: inputs.install_python_setuptools
+        run: python3 -m pip install setuptools
+
+      # ── node_modules cache ─────────────────────────────────────────────────
+
+      - name: Prepare node_modules cache key (Unix)
+        if: runner.os != 'Windows'
+        run: mkdir -p .build && node build/azure-pipelines/common/computeNodeModulesCacheKey.ts ${{ inputs.platform }} ${{ inputs.arch }} $(node -p process.arch) > .build/packagelockhash
+
+      - name: Prepare node_modules cache key (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir -Force .build
+          node build/azure-pipelines/common/computeNodeModulesCacheKey.ts ${{ inputs.platform }} ${{ inputs.arch }} $(node -p process.arch) | Out-File -Encoding ascii .build/packagelockhash
+
+      - name: Restore node_modules cache
+        id: cache-node-modules
+        uses: actions/cache/restore@v5
+        with:
+          path: .build/node_modules_cache
+          key: "node_modules-${{ inputs.platform }}-${{ inputs.arch }}-${{ hashFiles('.build/packagelockhash') }}"
+
+      - name: Extract node_modules cache (Unix)
+        if: steps.cache-node-modules.outputs.cache-hit == 'true' && runner.os != 'Windows'
+        run: tar -xzf .build/node_modules_cache/cache.tgz
+
+      - name: Extract node_modules cache (Windows)
+        if: steps.cache-node-modules.outputs.cache-hit == 'true' && runner.os == 'Windows'
+        run: 7z x .build/node_modules_cache/cache.7z -aoa
+
+      # ── install dependencies ───────────────────────────────────────────────
+
+      - name: Install build tools
+        if: steps.cache-node-modules.outputs.cache-hit != 'true' && inputs.install_build_tools
+        run: |
+          sudo apt update -y
+          sudo apt install -y build-essential pkg-config libx11-dev libx11-xcb-dev \
+            libxkbfile-dev libnotify-bin libkrb5-dev libgbm1 rpm
+
+      - name: Set npm architecture
+        if: inputs.node_arch != ''
+        shell: bash
+        run: echo "npm_config_arch=${{ inputs.node_arch }}" >> "$GITHUB_ENV"
+
+      - name: Install dependencies (Unix)
+        if: steps.cache-node-modules.outputs.cache-hit != 'true' && runner.os != 'Windows'
+        run: |
+          set -e
+          for i in {1..5}; do
+            npm ci && break
+            if [ $i -eq 5 ]; then
+              echo "Npm install failed too many times" >&2
+              exit 1
+            fi
+            echo "Npm install failed $i, trying again..."
+          done
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install dependencies (Windows)
+        if: steps.cache-node-modules.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $maxRetries = 5
+          for ($i = 1; $i -le $maxRetries; $i++) {
+            try {
+              npm ci
+              break
+            } catch {
+              if ($i -eq $maxRetries) {
+                Write-Error "Npm install failed after $maxRetries attempts"
+                exit 1
+              }
+              Write-Warning "Npm install failed attempt $i, retrying..."
+            }
+          }
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create node_modules archive (Unix)
+        if: steps.cache-node-modules.outputs.cache-hit != 'true' && runner.os != 'Windows'
+        run: |
+          set -e
+          node build/azure-pipelines/common/listNodeModules.ts .build/node_modules_list.txt
+          mkdir -p .build/node_modules_cache
+          tar -czf .build/node_modules_cache/cache.tgz --files-from .build/node_modules_list.txt
+
+      - name: Create node_modules archive (Windows)
+        if: steps.cache-node-modules.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        run: |
+          node build/azure-pipelines/common/listNodeModules.ts .build/node_modules_list.txt
+          mkdir -Force .build/node_modules_cache
+          7z a .build/node_modules_cache/cache.7z -mx3 `@.build/node_modules_list.txt
+
+      - name: Save node_modules cache
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: .build/node_modules_cache
+          key: "node_modules-${{ inputs.platform }}-${{ inputs.arch }}-${{ hashFiles('.build/packagelockhash') }}"
+
+      # ── compile & build ────────────────────────────────────────────────────
+
+      - name: Download and patch built-in extensions
+        # Required so build/lib/patchRemoteWsl.ts runs against ms-vscode-remote.remote-wsl.
+        # The gulp `core-ci` task downloads marketplace extensions via
+        # `getExtensionStream` (in build/lib/extensions.ts), which does NOT invoke
+        # the patch. Running this script populates `.build/builtInExtensions/` and
+        # patches the WSL extension in place; the subsequent gulp build then picks
+        # up the patched copy from disk via the `isUpToDate` cache hit.
+        run: npm run download-builtin-extensions
+
+      - name: Compile core
+        run: npm run gulp core-ci
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build client
+        run: npm run gulp "vscode-${{ inputs.platform }}-${{ inputs.arch }}-min-ci"
+
+      - name: Build REH server
+        # Publish standalone remote/WSL server artifacts alongside client builds.
+        run: npm run gulp "vscode-reh-${{ inputs.platform }}-${{ inputs.arch }}-min-ci"
+
+      # ── Windows-specific post-build steps ─────────────────────────────────
+
+      - name: Patch launcher APP_NAME for upstream server compat
+        if: inputs.patch_launcher
+        run: |
+          $launcher = "../VSCode-${{ inputs.platform }}-${{ inputs.arch }}/bin/code-oss"
+          if (-not (Test-Path $launcher)) { throw "Launcher not found at $launcher" }
+          $c = Get-Content $launcher -Raw
+          $c = $c -replace '(?m)^APP_NAME="code-oss"$', 'APP_NAME="code"'
+          [System.IO.File]::WriteAllText((Resolve-Path $launcher), $c)
+          Select-String -Path $launcher -Pattern '^APP_NAME='
+
+      - name: Build inno updater
+        if: inputs.build_inno_updater
+        run: npm run gulp "vscode-${{ inputs.platform }}-${{ inputs.arch }}-inno-updater"
+
+      # ── archive builds ─────────────────────────────────────────────────────
+
+      - name: Archive portable build (Linux)
+        if: runner.os != 'Windows' && inputs.portable_archive_ext == 'tar'
+        run: |
+          set -e
+          VERSION=$(node -p "require('./package.json').version")
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          cd ..
+          tar --owner=0 --group=0 -cf "$GITHUB_WORKSPACE/.build/portable.tar" VSCode-${{ inputs.platform }}-${{ inputs.arch }}
+
+      - name: Archive portable build (macOS)
+        if: runner.os != 'Windows' && inputs.portable_archive_ext == 'zip'
+        run: |
+          set -e
+          VERSION=$(node -p "require('./package.json').version")
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          cd ../VSCode-${{ inputs.platform }}-${{ inputs.arch }}
+          zip -0 -Xry "$GITHUB_WORKSPACE/.build/portable.zip" .
+
+      - name: Archive portable build (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $Version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          echo "VERSION=$Version" >> $env:GITHUB_ENV
+          Compress-Archive -Path "../VSCode-${{ inputs.platform }}-${{ inputs.arch }}/*" -DestinationPath ".build/portable.zip" -CompressionLevel NoCompression
+
+      - name: Archive REH server build (Linux)
+        if: runner.os != 'Windows' && inputs.portable_archive_ext == 'tar'
+        run: |
+          set -e
+          cd ..
+          tar --owner=0 --group=0 -cf "$GITHUB_WORKSPACE/.build/server.tar" vscode-reh-${{ inputs.platform }}-${{ inputs.arch }}
+
+      - name: Archive REH server build (macOS)
+        if: runner.os != 'Windows' && inputs.portable_archive_ext == 'zip'
+        run: |
+          set -e
+          cd ../vscode-reh-${{ inputs.platform }}-${{ inputs.arch }}
+          zip -0 -Xry "$GITHUB_WORKSPACE/.build/server.zip" .
+
+      - name: Archive REH server build (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          Compress-Archive -Path "../vscode-reh-${{ inputs.platform }}-${{ inputs.arch }}/*" -DestinationPath ".build/server.zip" -CompressionLevel NoCompression
+
+      # ── Linux packages ─────────────────────────────────────────────────────
+
+      - name: Build .deb package
+        if: inputs.build_packages
+        run: |
+          npm run gulp "vscode-${{ inputs.platform }}-${{ inputs.arch }}-prepare-deb"
+          npm run gulp "vscode-${{ inputs.platform }}-${{ inputs.arch }}-build-deb"
+
+      - name: Build .rpm package
+        if: inputs.build_packages
+        run: |
+          npm run gulp "vscode-${{ inputs.platform }}-${{ inputs.arch }}-prepare-rpm"
+          npm run gulp "vscode-${{ inputs.platform }}-${{ inputs.arch }}-build-rpm"
+
+      # ── upload artifacts ───────────────────────────────────────────────────
+
+      - name: Upload portable archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-oss-${{ inputs.platform }}-${{ inputs.arch }}-${{ env.VERSION }}.${{ inputs.portable_archive_ext }}
+          path: .build/portable.${{ inputs.portable_archive_ext }}
+
+      - name: Upload REH server archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-oss-server-${{ inputs.platform }}-${{ inputs.arch }}-${{ env.VERSION }}.${{ inputs.portable_archive_ext }}
+          path: .build/server.${{ inputs.portable_archive_ext }}
+
+      - name: Upload .deb package
+        if: inputs.build_packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-oss-${{ inputs.platform }}-${{ inputs.arch }}-${{ env.VERSION }}.deb
+          path: .build/linux/deb/${{ inputs.deb_arch }}/deb/*.deb
+
+      - name: Upload .rpm package
+        if: inputs.build_packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-oss-${{ inputs.platform }}-${{ inputs.arch }}-${{ env.VERSION }}.rpm
+          path: .build/linux/rpm/${{ inputs.rpm_arch }}/*.rpm
