@@ -80,24 +80,12 @@ jobs:
             TAG="(input override)"
             SHA="$INPUT_SHA"
           else
-            # Try to resolve from this repo's tags first (works when the fork
-            # tracks upstream tags). If no matching tag is reachable from HEAD,
-            # fall back to querying microsoft/vscode for the latest stable
-            # release tag and resolve it via the GitHub API.
-            # --exclude '*-*' skips fork-specific tags like '1.126.1-custom';
-            # real upstream release tags are always bare N.N.N.
-            TAG=$(git describe --tags --abbrev=0 --match '[0-9]*.[0-9]*.[0-9]*' --exclude '*-*' HEAD 2>/dev/null || true)
-            if [ -n "$TAG" ]; then
-              SHA=$(git rev-list -n 1 "$TAG")
-              echo "Resolved upstream tag $TAG -> $SHA (from local refs)"
-            else
-              echo "No matching tag reachable from HEAD; querying microsoft/vscode releases..."
-              TAG=$(gh api repos/microsoft/vscode/releases/latest --jq .tag_name)
-              # The /commits/<ref> endpoint dereferences any ref (including
-              # annotated tags) to its underlying commit SHA.
-              SHA=$(gh api "repos/microsoft/vscode/commits/$TAG" --jq .sha)
-              echo "Resolved upstream tag $TAG -> $SHA (from microsoft/vscode API)"
-            fi
+            echo "No workflow_dispatch input; resolving commit for this version from upstream..."
+            TAG=$(node -p "require('./package.json').version")
+            # The /commits/<ref> endpoint dereferences any ref (including
+            # annotated tags) to its underlying commit SHA.
+            SHA=$(gh api "repos/microsoft/vscode/commits/$TAG" --jq .sha)
+            echo "Resolved upstream tag $TAG -> $SHA (from microsoft/vscode API)"
           fi
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
