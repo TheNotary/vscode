@@ -28,7 +28,7 @@ import { LocalChatSessionUri } from '../../contrib/chat/common/model/chatUri.js'
 import { ChatAgentLocation } from '../../contrib/chat/common/constants.js';
 import { checkProposedApiEnabled, isProposedApiEnabled } from '../../services/extensions/common/extensions.js';
 import { Dto } from '../../services/extensions/common/proxyIdentifier.js';
-import { ExtHostChatAgentsShape2, IChatAgentCompletionItem, IChatAgentHistoryEntryDto, IChatAgentInvokeResult, IChatAgentProgressShape, IChatSessionCustomizationItemDto, IChatSessionCustomizationProviderMetadataDto, IChatSessionCustomizationSourceFolderDto, IChatProgressDto, IChatSessionContextDto, ICustomAgentDto, IExtensionChatAgentMetadata, IHookDto, IInstructionDto, IMainContext, IPluginDto, ISkillDto, ISlashCommandDto, MainContext, MainThreadChatAgentsShape2 } from './extHost.protocol.js';
+import { ExtHostChatAgentsShape2, IActiveChatSessionDto, IChatAgentCompletionItem, IChatAgentHistoryEntryDto, IChatAgentInvokeResult, IChatAgentProgressShape, IChatSessionCustomizationItemDto, IChatSessionCustomizationProviderMetadataDto, IChatSessionCustomizationSourceFolderDto, IChatProgressDto, IChatSessionContextDto, ICustomAgentDto, IExtensionChatAgentMetadata, IHookDto, IInstructionDto, IMainContext, IPluginDto, ISkillDto, ISlashCommandDto, MainContext, MainThreadChatAgentsShape2 } from './extHost.protocol.js';
 import { CommandsConverter, ExtHostCommands } from './extHostCommands.js';
 import { ExtHostDiagnostics } from './extHostDiagnostics.js';
 import { ExtHostDocuments } from './extHostDocuments.js';
@@ -529,12 +529,20 @@ export class ExtHostChatAgents2 extends Disposable implements ExtHostChatAgentsS
 	private readonly _plugins = new CachedPromise(() => this._proxy.$providePlugins(CancellationToken.None).then(plugins => plugins.map(plugin => this.toPlugin(plugin))));
 
 	private _activeChatPanelSessionResource: URI | undefined;
+	private _activeChatPanelSession: ChatPanelSessionImpl | undefined;
 
 	private readonly _onDidChangeActiveChatPanelSessionResource = this._register(new Emitter<URI | undefined>());
 	readonly onDidChangeActiveChatPanelSessionResource = this._onDidChangeActiveChatPanelSessionResource.event;
 
+	private readonly _onDidChangeActiveChatPanelSession = this._register(new Emitter<vscode.ChatPanelSession | undefined>());
+	readonly onDidChangeActiveChatPanelSession = this._onDidChangeActiveChatPanelSession.event;
+
 	get activeChatPanelSessionResource(): URI | undefined {
 		return this._activeChatPanelSessionResource;
+	}
+
+	get activeChatPanelSession(): vscode.ChatPanelSession | undefined {
+		return this._activeChatPanelSession?.apiObject;
 	}
 
 
@@ -1164,14 +1172,24 @@ export class ExtHostChatAgents2 extends Disposable implements ExtHostChatAgentsS
 		}
 	}
 
-	$acceptActiveChatSession(sessionResourceDto: UriComponents | undefined): void {
-		const sessionResource = sessionResourceDto ? URI.revive(sessionResourceDto) : undefined;
-		if (this._activeChatPanelSessionResource?.toString() === sessionResource?.toString()) {
-			return;
-		}
+	$acceptActiveChatSession(session: IActiveChatSessionDto | undefined): void {
+		const sessionResource = session ? URI.revive(session.resource) : undefined;
+		const resourceChanged = this._activeChatPanelSessionResource?.toString() !== sessionResource?.toString();
 
-		this._activeChatPanelSessionResource = sessionResource;
-		this._onDidChangeActiveChatPanelSessionResource.fire(sessionResource);
+		if (resourceChanged) {
+			// Session switched — create new wrapper or clear
+			this._activeChatPanelSessionResource = sessionResource;
+			if (session && sessionResource) {
+				this._activeChatPanelSession = new ChatPanelSessionImpl(sessionResource, session.title, session.requestInProgress, session.lastMessageDate, this._proxy);
+			} else {
+				this._activeChatPanelSession = undefined;
+			}
+			this._onDidChangeActiveChatPanelSessionResource.fire(sessionResource);
+			this._onDidChangeActiveChatPanelSession.fire(this._activeChatPanelSession?.apiObject);
+		} else if (session && this._activeChatPanelSession) {
+			// Same session — update properties silently
+			this._activeChatPanelSession._update(session.title, session.requestInProgress, session.lastMessageDate);
+		}
 	}
 
 	async $provideFollowups(requestDto: Dto<IChatAgentRequest>, handle: number, result: IChatAgentResult, context: { history: IChatAgentHistoryEntryDto[] }, token: CancellationToken): Promise<IChatFollowup[]> {
@@ -1547,6 +1565,51 @@ function raceCancellationWithTimeout<T>(cancelWait: number, promise: Promise<T>,
 		});
 		promise.then(resolve, reject).finally(() => ref.dispose());
 	});
+}
+
+/**
+ * Live wrapper around an active chat panel session.
+ * The frozen API object uses getters so extensions always read current values.
+ */
+class ChatPanelSessionImpl {
+
+	private _title: string;
+	private _requestInProgress: boolean;
+	private _lastMessageDate: number;
+
+	readonly apiObject: vscode.ChatPanelSession;
+
+	constructor(
+		private readonly _resource: URI,
+		title: string,
+		requestInProgress: boolean,
+		lastMessageDate: number,
+		private readonly _proxy: MainThreadChatAgentsShape2,
+	) {
+		this._title = title;
+		this._requestInProgress = requestInProgress;
+		this._lastMessageDate = lastMessageDate;
+
+		const that = this;
+		this.apiObject = {
+			get resource() { return that._resource; },
+			get title() { return that._title; },
+			set title(value: string) { that._setTitle(value); },
+			get requestInProgress() { return that._requestInProgress; },
+			get lastMessageDate() { return that._lastMessageDate; },
+		};
+	}
+
+	private _setTitle(value: string): void {
+		this._title = value;
+		this._proxy.$setChatSessionTitle(this._resource, value);
+	}
+
+	_update(title: string, requestInProgress: boolean, lastMessageDate: number): void {
+		this._title = title;
+		this._requestInProgress = requestInProgress;
+		this._lastMessageDate = lastMessageDate;
+	}
 }
 
 /**

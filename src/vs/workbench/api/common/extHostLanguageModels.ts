@@ -466,6 +466,7 @@ export class ExtHostLanguageModels implements ExtHostLanguageModelsShape {
 				editToolsHint: model.metadata.capabilities?.editTools,
 			},
 			maxInputTokens: model.metadata.maxInputTokens,
+			configurationSchema: model.metadata.configurationSchema as vscode.LanguageModelConfigurationSchema | undefined,
 			countTokens(text, token) {
 				if (!that._localModels.has(modelId)) {
 					throw extHostTypes.LanguageModelError.NotFound(modelId);
@@ -489,7 +490,6 @@ export class ExtHostLanguageModels implements ExtHostLanguageModelsShape {
 		// this triggers extension activation
 		const models = await this._proxy.$selectChatModels({ ...selector, extension: extension.identifier });
 
-		// Skip the warn/retry path in `getLanguageModelByIdentifier`: identifiers are fresh, so a missing local entry means the provider lives in another ext host and re-resolving will not help.
 		const modelResults = await Promise.all(models.map(identifier => this._createLanguageModelChatApi(extension, identifier)));
 		return modelResults.filter((m): m is vscode.LanguageModelChat => !!m);
 	}

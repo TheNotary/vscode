@@ -3100,6 +3100,25 @@ export enum ChatRequestEditedFileEventKind {
 	UserModification = 3,
 }
 
+export enum ChatModeKind {
+	Ask = 'ask',
+	Edit = 'edit',
+	Agent = 'agent',
+}
+
+export enum AuthorChatMessagePermissions {
+	Default = 'default',
+	AutoApprove = 'autoApprove',
+	Autopilot = 'autopilot',
+}
+
+export enum AuthorChatMessageErrorCode {
+	SessionAcquisitionFailed = 'sessionAcquisitionFailed',
+	WidgetUnavailable = 'widgetUnavailable',
+	ModelNotFound = 'modelNotFound',
+	RequestRejected = 'requestRejected',
+}
+
 //#endregion
 
 //#region Interactive Editor
