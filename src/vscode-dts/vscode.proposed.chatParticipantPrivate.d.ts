@@ -386,6 +386,83 @@ declare module 'vscode' {
 		export const onDidDisposeChatSession: Event<string>;
 	}
 
+	/**
+	 * Options for {@link window.authorChatMessage} that control which model,
+	 * agent, and configuration the message is sent with. The corresponding UI
+	 * elements (model picker, permission level, etc.) are updated to reflect
+	 * the specified values before the message is dispatched.
+	 */
+	export interface AuthorChatMessageOptions {
+		/**
+		 * A language model selector. The first matching model will be selected
+		 * in the model picker before the message is sent.
+		 */
+		model?: LanguageModelChatSelector;
+
+		/**
+		 * The ID of the chat agent to target. The message will be routed to
+		 * this agent without adding an `@` mention to the displayed text.
+		 */
+		agent?: string;
+
+		/**
+		 * The thinking effort level (e.g. `'low'`, `'medium'`, `'high'`).
+		 * Valid values depend on the selected model's configuration schema.
+		 */
+		thinkingEffort?: string;
+
+		/**
+		 * The context size (max input tokens) to use for this request.
+		 * Valid values depend on the selected model's configuration schema.
+		 */
+		contextSize?: number;
+
+		/**
+		 * The permission level for tool auto-approval.
+		 * - `'default'`: Use existing auto-approve settings.
+		 * - `'autoApprove'`: Auto-approve all tool calls and retry on errors.
+		 * - `'autopilot'`: Everything autoApprove does plus continues until the task is done.
+		 */
+		permissions?: 'default' | 'autoApprove' | 'autopilot';
+	}
+
+	/**
+	 * Describes a language model that was available during an
+	 * {@link window.authorChatMessage} call.
+	 */
+	export interface AuthorChatMessageModelInfo {
+		readonly id: string;
+		readonly vendor: string;
+		readonly family: string;
+		readonly version: string;
+	}
+
+	/**
+	 * Error returned by {@link window.authorChatMessage} when the message
+	 * could not be sent. Inspect {@link code} and {@link message} for details.
+	 */
+	export interface AuthorChatMessageError {
+		/**
+		 * A machine-readable error code.
+		 * - `'sessionAcquisitionFailed'`: The chat session could not be created or loaded.
+		 * - `'widgetUnavailable'`: The chat widget could not be opened or found.
+		 * - `'modelNotFound'`: No model matched the provided selector.
+		 * - `'requestRejected'`: The chat service rejected the send request.
+		 */
+		readonly code: 'sessionAcquisitionFailed' | 'widgetUnavailable' | 'modelNotFound' | 'requestRejected';
+
+		/**
+		 * A human-readable description of the error.
+		 */
+		readonly message: string;
+
+		/**
+		 * When {@link code} is `'modelNotFound'`, the list of models that were
+		 * available at the time of the call. Useful for diagnosing selector mismatches.
+		 */
+		readonly availableModels?: AuthorChatMessageModelInfo[];
+	}
+
 	export namespace window {
 		/**
 		 * The resource URI of the currently active chat panel session,
@@ -407,6 +484,21 @@ declare module 'vscode' {
 		 * Returns `true` if the message was sent, otherwise `false`.
 		 */
 		export function sendChatMessage(sessionResource: Uri, message: string): Thenable<boolean>;
+
+		/**
+		 * Sends a message to a chat session while also updating the chat panel UI
+		 * to reflect the specified parameters (model, agent, thinking effort, context
+		 * size, permissions). The session will be opened/revealed if not already visible.
+		 *
+		 * If `sessionResource` is `null` or `undefined`, a new chat session is created
+		 * automatically and used for the message.
+		 *
+		 * Returns the {@link Uri} of the session on success (the existing or newly
+		 * created session), or an {@link AuthorChatMessageError} if the message could
+		 * not be sent. When a model selector is provided but no model matches, the
+		 * error includes the list of available models for diagnostic purposes.
+		 */
+		export function authorChatMessage(sessionResource: Uri | null | undefined, message: string, options?: AuthorChatMessageOptions): Thenable<Uri | AuthorChatMessageError>;
 
 		/**
 		 * An event that fires when the active chat panel session resource changes.
