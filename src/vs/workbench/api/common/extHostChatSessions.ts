@@ -435,6 +435,16 @@ export class ExtHostChatSessions extends Disposable implements ExtHostChatSessio
 		return this._proxy.$sendChatMessage(sessionResource, message);
 	}
 
+	authorChatMessage(sessionResource: vscode.Uri | null | undefined, message: string, options?: vscode.AuthorChatMessageOptions): Promise<vscode.Uri | false> {
+		return this._proxy.$authorChatMessage(sessionResource ?? undefined, message, options ? {
+			model: options.model ? { vendor: options.model.vendor, family: options.model.family, version: options.model.version, id: options.model.id } : undefined,
+			agent: options.agent,
+			thinkingEffort: options.thinkingEffort,
+			contextSize: options.contextSize,
+			permissions: options.permissions,
+		} : undefined).then(result => result === false ? false : URI.revive(result));
+	}
+
 
 	registerChatSessionItemProvider(extension: IExtensionDescription, chatSessionType: string, provider: vscode.ChatSessionItemProvider): vscode.Disposable {
 		// The legacy provider api is implemented using the new controller API on the backend
