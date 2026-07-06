@@ -7,7 +7,7 @@ import { DeferredPromise } from '../../../base/common/async.js';
 import { CancellationToken } from '../../../base/common/cancellation.js';
 import { Emitter, Event } from '../../../base/common/event.js';
 import { IMarkdownString } from '../../../base/common/htmlContent.js';
-import { Disposable, DisposableMap, IDisposable } from '../../../base/common/lifecycle.js';
+import { Disposable, DisposableMap, DisposableStore, IDisposable } from '../../../base/common/lifecycle.js';
 import { autorun } from '../../../base/common/observable.js';
 import { revive } from '../../../base/common/marshalling.js';
 import { Schemas } from '../../../base/common/network.js';
@@ -43,7 +43,7 @@ import { ILanguageModelToolsService } from '../../contrib/chat/common/tools/lang
 import { IExtHostContext, extHostNamedCustomer } from '../../services/extensions/common/extHostCustomers.js';
 import { IExtensionService } from '../../services/extensions/common/extensions.js';
 import { Dto } from '../../services/extensions/common/proxyIdentifier.js';
-import { ExtHostChatAgentsShape2, ExtHostContext, IChatAgentInvokeResult, IChatSessionCustomizationItemDto, IChatSessionCustomizationProviderMetadataDto, IChatNotebookEditDto, IChatParticipantMetadata, IChatProgressDto, IChatSessionContextDto, ICustomAgentDto, IDynamicChatAgentProps, IExtensionChatAgentMetadata, IHookDto, IInstructionDto, IPluginDto, ISkillDto, ISlashCommandDto, MainContext, MainThreadChatAgentsShape2 } from '../common/extHost.protocol.js';
+import { ExtHostChatAgentsShape2, ExtHostContext, IActiveChatSessionDto, IChatAgentInvokeResult, IChatSessionCustomizationItemDto, IChatSessionCustomizationProviderMetadataDto, IChatNotebookEditDto, IChatParticipantMetadata, IChatProgressDto, IChatSessionContextDto, ICustomAgentDto, IDynamicChatAgentProps, IExtensionChatAgentMetadata, IHookDto, IInstructionDto, IPluginDto, ISkillDto, ISlashCommandDto, MainContext, MainThreadChatAgentsShape2 } from '../common/extHost.protocol.js';
 import { NotebookDto } from './mainThreadNotebookDto.js';
 import { getChatSessionType, isUntitledChatSession } from '../../contrib/chat/common/model/chatUri.js';
 import { ICustomizationHarnessService, ICustomizationItem, ICustomizationItemProvider, IHarnessDescriptor } from '../../contrib/chat/common/customizationHarnessService.js';
@@ -120,6 +120,7 @@ export class MainThreadChatAgents2 extends Disposable implements MainThreadChatA
 	private readonly _proxy: ExtHostChatAgentsShape2;
 
 	private readonly _activeTasks = new Map<string, IChatTask>();
+	private readonly _activeSessionListeners = this._register(new DisposableStore());
 
 	private readonly _unresolvedAnchors = new Map</* requestId */string, Map</* id */ string, UnresolvedAnchor>>();
 
@@ -196,9 +197,37 @@ export class MainThreadChatAgents2 extends Disposable implements MainThreadChatA
 	}
 
 	private _acceptActiveChatSession(widget: IChatWidget | undefined): void {
+		this._activeSessionListeners.clear();
+
 		const sessionResource = widget?.viewModel?.sessionResource;
 		const isLocal = sessionResource && getAgentSessionProvider(sessionResource) === AgentSessionProviders.Local;
-		this._proxy.$acceptActiveChatSession(isLocal ? sessionResource : undefined);
+		if (!isLocal || !widget?.viewModel) {
+			this._proxy.$acceptActiveChatSession(undefined);
+			return;
+		}
+
+		const model = widget.viewModel.model;
+		const buildDto = (): IActiveChatSessionDto => ({
+			resource: sessionResource,
+			title: model.title,
+			requestInProgress: model.requestInProgress.get(),
+			lastMessageDate: model.lastMessageDate,
+		});
+
+		this._proxy.$acceptActiveChatSession(buildDto());
+
+		// Re-push when title or request list changes
+		this._activeSessionListeners.add(model.onDidChange(e => {
+			if (e.kind === 'setCustomTitle' || e.kind === 'addRequest' || e.kind === 'removeRequest') {
+				this._proxy.$acceptActiveChatSession(buildDto());
+			}
+		}));
+
+		// Re-push when requestInProgress changes
+		this._activeSessionListeners.add(autorun(reader => {
+			model.requestInProgress.read(reader);
+			this._proxy.$acceptActiveChatSession(buildDto());
+		}));
 	}
 
 	private _toChatResourceSource(storage: PromptsStorage): ICustomAgentDto['source'] {
@@ -335,6 +364,10 @@ export class MainThreadChatAgents2 extends Disposable implements MainThreadChatA
 		}
 
 		await this._chatService.transferChatSession(model.sessionResource, URI.revive(toWorkspace));
+	}
+
+	$setChatSessionTitle(sessionResource: UriComponents, title: string): void {
+		this._chatService.setSessionTitle(URI.revive(sessionResource), title);
 	}
 
 	async $registerAgent(handle: number, extension: ExtensionIdentifier, id: string, metadata: IExtensionChatAgentMetadata, dynamicProps: IDynamicChatAgentProps | undefined): Promise<void> {

@@ -398,6 +398,9 @@ export class ExtHostChatSessions extends Disposable implements ExtHostChatSessio
 	 */
 	private readonly _proxyCommands = new Map</* proxyId */ string, { readonly originalCommandId: string; readonly controllerHandle: number }>();
 
+	private readonly _onDidChangeAvailableModes = this._register(new Emitter<void>());
+	readonly onDidChangeAvailableModes = this._onDidChangeAvailableModes.event;
+
 	constructor(
 		private readonly commands: ExtHostCommands,
 		private readonly _languageModels: ExtHostLanguageModels,
@@ -433,6 +436,58 @@ export class ExtHostChatSessions extends Disposable implements ExtHostChatSessio
 
 	sendChatMessage(sessionResource: vscode.Uri, message: string): Promise<boolean> {
 		return this._proxy.$sendChatMessage(sessionResource, message);
+	}
+
+	authorChatMessage(options: vscode.AuthorChatMessageOptions): Promise<vscode.AuthorChatMessageResult> {
+		return this._proxy.$authorChatMessage({
+			message: options.message,
+			sessionResource: options.sessionResource,
+			model: options.model ? { vendor: options.model.vendor, family: options.model.family, version: options.model.version, id: options.model.id } : undefined,
+			agent: options.agent,
+			mode: options.mode,
+			reasoningEffort: options.reasoningEffort,
+			contextSize: options.contextSize,
+			permissions: options.permissions,
+		}).then(result => {
+			return {
+				sessionResource: result.sessionResource ? URI.revive(result.sessionResource) : undefined,
+				error: result.error ? {
+					code: result.error.code as string as vscode.AuthorChatMessageErrorCode,
+					message: result.error.message,
+					availableModels: result.error.availableModels,
+				} : undefined,
+			} satisfies vscode.AuthorChatMessageResult;
+		});
+	}
+
+	getAvailableModes(): Promise<readonly vscode.ChatAvailableMode[]> {
+		return this._proxy.$getAvailableModes().then(modes => modes.map(mode => Object.freeze({
+			id: mode.id,
+			name: mode.name,
+			description: mode.description,
+			kind: mode.kind as vscode.ChatModeKind,
+			isBuiltin: mode.isBuiltin,
+		})));
+	}
+
+	getAvailableModels(): Promise<readonly vscode.ChatAvailableModel[]> {
+		return this._proxy.$getAvailableModels().then(models => models.map(model => Object.freeze({
+			id: model.id,
+			vendor: model.vendor,
+			family: model.family,
+			version: model.version,
+			name: model.name,
+			detail: model.detail,
+			maxInputTokens: model.maxInputTokens,
+			maxOutputTokens: model.maxOutputTokens,
+			capabilities: Object.freeze({
+				imageInput: model.capabilities.imageInput,
+				toolCalling: model.capabilities.toolCalling,
+			}),
+			configurationSchema: model.configurationSchema as vscode.ParticipantForkLanguageModelConfigurationSchema | undefined,
+			isUserSelectable: model.isUserSelectable,
+			targetChatSessionType: model.targetChatSessionType,
+		})));
 	}
 
 
@@ -1271,5 +1326,9 @@ export class ExtHostChatSessions extends Disposable implements ExtHostChatSessio
 			commands: g.commands,
 			kind: g.kind,
 		}));
+	}
+
+	$onDidChangeAvailableModes(): void {
+		this._onDidChangeAvailableModes.fire();
 	}
 }

@@ -10,6 +10,7 @@ import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Event } from '../../../../base/common/event.js';
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
 import { MarshalledId } from '../../../../base/common/marshallingIds.js';
+import { constObservable } from '../../../../base/common/observable.js';
 import { URI } from '../../../../base/common/uri.js';
 import { asSinonMethodStub } from '../../../../base/test/common/sinonUtils.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
@@ -19,17 +20,27 @@ import { ContextKeyService } from '../../../../platform/contextkey/browser/conte
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { IDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { TestInstantiationService } from '../../../../platform/instantiation/test/common/instantiationServiceMock.js';
+import { ServiceCollection } from '../../../../platform/instantiation/common/serviceCollection.js';
 import { ILabelService } from '../../../../platform/label/common/label.js';
 import { ILogService, NullLogService } from '../../../../platform/log/common/log.js';
+import { ExtensionIdentifier } from '../../../../platform/extensions/common/extensions.js';
 import { IAgentSessionsModel } from '../../../contrib/chat/browser/agentSessions/agentSessionsModel.js';
 import { IAgentSessionsService } from '../../../contrib/chat/browser/agentSessions/agentSessionsService.js';
+import { IChatWidget, IChatWidgetService } from '../../../contrib/chat/browser/chat.js';
 import { ChatSessionsService } from '../../../contrib/chat/browser/chatSessions/chatSessions.contribution.js';
-import { IChatProgress, IChatProgressMessage, IChatService } from '../../../contrib/chat/common/chatService/chatService.js';
+import { IChatProgress, IChatProgressMessage, IChatSendRequestOptions, IChatService } from '../../../contrib/chat/common/chatService/chatService.js';
 import { IChatSessionProviderOptionGroup, IChatSessionItem, IChatSessionRequestHistoryItem, IChatSessionsService } from '../../../contrib/chat/common/chatSessionsService.js';
-import { ChatAgentLocation } from '../../../contrib/chat/common/constants.js';
+import { ChatAgentLocation, ChatModeKind } from '../../../contrib/chat/common/constants.js';
+import { IChatModeService } from '../../../contrib/chat/common/chatModes.js';
+import { IChatDebugService } from '../../../contrib/chat/common/chatDebugService.js';
+import { Target } from '../../../contrib/chat/common/promptSyntax/promptTypes.js';
 import { LocalChatSessionUri } from '../../../contrib/chat/common/model/chatUri.js';
 import { IChatAgentRequest, IChatAgentResult } from '../../../contrib/chat/common/participants/chatAgents.js';
+import { IChatArtifactsService } from '../../../contrib/chat/common/tools/chatArtifactsService.js';
+import { IChatTodoListService } from '../../../contrib/chat/common/tools/chatTodoListService.js';
+import { ILanguageModelChatMetadata, ILanguageModelsService } from '../../../contrib/chat/common/languageModels.js';
 import { MockChatService } from '../../../contrib/chat/test/common/chatService/mockChatService.js';
+import { IEditorGroupsService } from '../../../services/editor/common/editorGroupsService.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { IExtHostContext } from '../../../services/extensions/common/extHostCustomers.js';
 import { ExtensionHostKind } from '../../../services/extensions/common/extensionHostKind.js';
@@ -76,6 +87,7 @@ suite('ObservableChatSession', function () {
 			$forkChatSession: sinon.stub().resolves(undefined),
 			$resolveChatSessionItem: sinon.stub().resolves(undefined),
 			$provideChatSessionInputState: sinon.stub().resolves(undefined),
+			$onDidChangeAvailableModes: sinon.stub(),
 		};
 	});
 
@@ -507,8 +519,31 @@ suite('MainThreadChatSessions', function () {
 	let instantiationService: TestInstantiationService;
 	let mainThread: MainThreadChatSessions;
 	let proxy: ExtHostChatSessionsShape;
+	let extHostContext: IExtHostContext;
 	let chatSessionsService: IChatSessionsService;
 	let disposables: DisposableStore;
+	const modelId = 'test-vendor/test-model';
+	const configurationSchema: vscode.ParticipantForkLanguageModelConfigurationSchema = {
+		properties: {
+			reasoningEffort: {
+				type: 'string',
+				enum: ['low', 'high'],
+				default: 'low',
+			},
+		},
+	};
+	const modelMetadata: ILanguageModelChatMetadata = {
+		extension: new ExtensionIdentifier('test.extension'),
+		name: 'Test Model',
+		id: 'test-model',
+		vendor: 'test-vendor',
+		version: '1',
+		family: 'test-family',
+		maxInputTokens: 1_000_000,
+		maxOutputTokens: 32_000,
+		isDefaultForLocation: {},
+		configurationSchema,
+	};
 
 	setup(function () {
 		disposables = new DisposableStore();
@@ -527,9 +562,10 @@ suite('MainThreadChatSessions', function () {
 			$forkChatSession: sinon.stub().resolves(undefined),
 			$resolveChatSessionItem: sinon.stub().resolves(undefined),
 			$provideChatSessionInputState: sinon.stub().resolves(undefined),
+			$onDidChangeAvailableModes: sinon.stub(),
 		};
 
-		const extHostContext = new class implements IExtHostContext {
+		extHostContext = new class implements IExtHostContext {
 			remoteAuthority = '';
 			extensionHostKind = ExtensionHostKind.LocalProcess;
 			dispose() { }
@@ -560,6 +596,24 @@ suite('MainThreadChatSessions', function () {
 			}
 		});
 		instantiationService.stub(IChatService, new MockChatService());
+		instantiationService.stub(IChatWidgetService, new class extends mock<IChatWidgetService>() { });
+		instantiationService.stub(ILanguageModelsService, new class extends mock<ILanguageModelsService>() { });
+		instantiationService.stub(IChatTodoListService, new class extends mock<IChatTodoListService>() { });
+		instantiationService.stub(IChatArtifactsService, new class extends mock<IChatArtifactsService>() { });
+		instantiationService.stub(IChatDebugService, new class extends mock<IChatDebugService>() { });
+		instantiationService.stub(IEditorGroupsService, new class extends mock<IEditorGroupsService>() { });
+		instantiationService.stub(IChatModeService, new class extends mock<IChatModeService>() {
+			override async getLocalModes() {
+				return {
+					onDidChange: Event.None,
+					builtin: [],
+					custom: [],
+					findModeById: () => undefined,
+					findModeByName: () => undefined,
+					waitForPendingUpdates: async () => { },
+				};
+			}
+		});
 		instantiationService.stub(IAgentSessionsService, new class extends mock<IAgentSessionsService>() {
 			override get model(): IAgentSessionsModel {
 				return new class extends mock<IAgentSessionsModel>() {
@@ -581,6 +635,199 @@ suite('MainThreadChatSessions', function () {
 	});
 
 	ensureNoDisposablesAreLeakedInTestSuite();
+
+	function createAuthorChatMessageHarness(initialModelConfiguration: Record<string, unknown>, options: { selectedModelId?: string } = { selectedModelId: modelId }) {
+		const sessionResource = LocalChatSessionUri.forSession('author-message-test');
+		const selectedModelId = options.selectedModelId;
+		const modeInfo = { kind: 'agent' as const, isBuiltin: true };
+		const userSelectedTools = constObservable({ copilot_memory: true, search: true });
+		let currentModelConfiguration = { ...initialModelConfiguration };
+		const setModelConfiguration = sinon.spy(async (_modelId: string, values: Record<string, unknown>) => {
+			currentModelConfiguration = { ...currentModelConfiguration, ...values };
+		});
+		const input = {
+			currentLanguageModel: selectedModelId,
+			selectedLanguageModel: { get: () => selectedModelId ? { identifier: selectedModelId, metadata: modelMetadata } : undefined },
+			currentModeInfo: modeInfo,
+			setCurrentLanguageModel: sinon.stub(),
+			setChatMode: sinon.stub(),
+			setPermissionLevel: sinon.stub(),
+			setModelConfiguration,
+			getModelConfiguration: sinon.spy(() => selectedModelId ? currentModelConfiguration : undefined),
+		};
+		const widget = { input, getModeRequestOptions: () => ({ modeInfo, userSelectedTools }) } as unknown as IChatWidget;
+		const sendRequest = sinon.stub<[sessionResource: URI, message: string, options?: IChatSendRequestOptions]>().resolves({ kind: 'sent' });
+		const chatService = new class extends MockChatService {
+			override startNewLocalSession() {
+				return { object: { sessionResource }, dispose: sinon.spy() } as unknown as ReturnType<IChatService['startNewLocalSession']>;
+			}
+			override sendRequest = sendRequest;
+		};
+
+		instantiationService.stub(IChatService, chatService);
+		instantiationService.stub(IChatWidgetService, new class extends mock<IChatWidgetService>() {
+			override getWidgetBySessionResource() { return widget; }
+		});
+		instantiationService.stub(ILanguageModelsService, new class extends mock<ILanguageModelsService>() {
+			override lookupLanguageModel(id: string) { return id === modelId ? modelMetadata : undefined; }
+		});
+		mainThread.dispose();
+		instantiationService = instantiationService.createChild(new ServiceCollection());
+		mainThread = disposables.add(instantiationService.createInstance(MainThreadChatSessions, extHostContext));
+
+		return { input, sendRequest, setModelConfiguration, userSelectedTools, getCurrentConfiguration: () => currentModelConfiguration };
+	}
+
+	test('$getAvailableModels exposes model configuration schemas', async function () {
+		instantiationService.stub(ILanguageModelsService, new class extends mock<ILanguageModelsService>() {
+			override async selectLanguageModels() { return [modelId]; }
+			override lookupLanguageModel(id: string) { return id === modelId ? modelMetadata : undefined; }
+		});
+		mainThread.dispose();
+		instantiationService = instantiationService.createChild(new ServiceCollection());
+		mainThread = disposables.add(instantiationService.createInstance(MainThreadChatSessions, extHostContext));
+
+		const models = await mainThread.$getAvailableModels();
+
+		assert.deepStrictEqual(models.map(model => ({
+			id: model.id,
+			configurationSchema: model.configurationSchema,
+		})), [{
+			id: 'test-model',
+			configurationSchema,
+		}]);
+	});
+
+	test('$getAvailableModes returns builtin and custom modes', async function () {
+		instantiationService.stub(IChatModeService, new class extends mock<IChatModeService>() {
+			override async getLocalModes() {
+				return {
+					onDidChange: Event.None,
+					builtin: [{
+						id: 'agent',
+						name: constObservable('Agent'),
+						label: constObservable('Agent'),
+						icon: constObservable(undefined),
+						description: constObservable('Agent mode'),
+						kind: ChatModeKind.Agent,
+						isBuiltin: true,
+						target: constObservable(Target.Undefined),
+					}],
+					custom: [
+						{
+							id: 'file:///custom-mode.agent.md',
+							name: constObservable('Plan'),
+							label: constObservable('Plan'),
+							icon: constObservable(undefined),
+							description: constObservable('Planning mode'),
+							kind: ChatModeKind.Agent,
+							isBuiltin: false,
+							target: constObservable(Target.Undefined),
+							visibility: constObservable({ userInvocable: true, agentInvocable: true }),
+						},
+						{
+							id: 'file:///hidden-mode.agent.md',
+							name: constObservable('Hidden'),
+							label: constObservable('Hidden'),
+							icon: constObservable(undefined),
+							description: constObservable('Hidden mode'),
+							kind: ChatModeKind.Agent,
+							isBuiltin: false,
+							target: constObservable(Target.Undefined),
+							visibility: constObservable({ userInvocable: false, agentInvocable: true }),
+						},
+					],
+					findModeById: () => undefined,
+					findModeByName: () => undefined,
+					waitForPendingUpdates: async () => { },
+				};
+			}
+		});
+		mainThread.dispose();
+		instantiationService = instantiationService.createChild(new ServiceCollection());
+		mainThread = disposables.add(instantiationService.createInstance(MainThreadChatSessions, extHostContext));
+
+		const modes = await mainThread.$getAvailableModes();
+
+		assert.deepStrictEqual(modes, [
+			{ id: 'agent', name: 'Agent', description: 'Agent mode', kind: 'agent', isBuiltin: true },
+			{ id: 'file:///custom-mode.agent.md', name: 'Plan', description: 'Planning mode', kind: 'agent', isBuiltin: false },
+		]);
+	});
+
+	test('$authorChatMessage applies full model configuration through the active input', async function () {
+		const harness = createAuthorChatMessageHarness({ thinkingEffort: 'low', contextSize: 200_000 });
+
+		await mainThread.$authorChatMessage({ message: 'Hello', reasoningEffort: 'high', contextSize: 1_000_000 });
+
+		assert.deepStrictEqual({
+			setModelConfiguration: harness.setModelConfiguration.args,
+			effectiveConfiguration: harness.getCurrentConfiguration(),
+			sendRequest: harness.sendRequest.args.map(([resource, message, options]) => [resource.toString(), message, options]),
+		}, {
+			setModelConfiguration: [[modelId, { thinkingEffort: 'high', contextSize: 1_000_000 }]],
+			effectiveConfiguration: { thinkingEffort: 'high', contextSize: 1_000_000 },
+			sendRequest: [[
+				LocalChatSessionUri.forSession('author-message-test').toString(),
+				'Hello',
+				{
+					agentIdSilent: undefined,
+					userSelectedModelId: modelId,
+					userSelectedModelConfiguration: { thinkingEffort: 'high', contextSize: 1_000_000 },
+					modeInfo: harness.input.currentModeInfo,
+					userSelectedTools: harness.userSelectedTools,
+				},
+			]],
+		});
+	});
+
+	test('$authorChatMessage partial model configuration preserves the other input value', async function () {
+		const reasoningHarness = createAuthorChatMessageHarness({ thinkingEffort: 'low', contextSize: 200_000 });
+		await mainThread.$authorChatMessage({ message: 'Reasoning', reasoningEffort: 'high' });
+
+		const contextHarness = createAuthorChatMessageHarness({ thinkingEffort: 'medium', contextSize: 200_000 });
+		await mainThread.$authorChatMessage({ message: 'Context', contextSize: 1_000_000 });
+
+		assert.deepStrictEqual({
+			reasoning: {
+				setModelConfiguration: reasoningHarness.setModelConfiguration.args,
+				effectiveConfiguration: reasoningHarness.getCurrentConfiguration(),
+			},
+			context: {
+				setModelConfiguration: contextHarness.setModelConfiguration.args,
+				effectiveConfiguration: contextHarness.getCurrentConfiguration(),
+			},
+		}, {
+			reasoning: {
+				setModelConfiguration: [[modelId, { thinkingEffort: 'high' }]],
+				effectiveConfiguration: { thinkingEffort: 'high', contextSize: 200_000 },
+			},
+			context: {
+				setModelConfiguration: [[modelId, { contextSize: 1_000_000 }]],
+				effectiveConfiguration: { thinkingEffort: 'medium', contextSize: 1_000_000 },
+			},
+		});
+	});
+
+	test('$authorChatMessage skips model configuration when no model is selected', async function () {
+		const harness = createAuthorChatMessageHarness({}, { selectedModelId: undefined });
+
+		await mainThread.$authorChatMessage({ message: 'Hello', reasoningEffort: 'high', contextSize: 1_000_000 });
+
+		assert.deepStrictEqual({
+			setModelConfigurationCallCount: harness.setModelConfiguration.callCount,
+			sendRequestOptions: harness.sendRequest.firstCall.args[2],
+		}, {
+			setModelConfigurationCallCount: 0,
+			sendRequestOptions: {
+				agentIdSilent: undefined,
+				userSelectedModelId: undefined,
+				userSelectedModelConfiguration: undefined,
+				modeInfo: harness.input.currentModeInfo,
+				userSelectedTools: harness.userSelectedTools,
+			},
+		});
+	});
 
 	test('provideChatSessionContent creates and initializes session', async function () {
 		const sessionScheme = 'test-session-type';
@@ -1173,6 +1420,8 @@ suite('ExtHostChatSessions', function () {
 		$onDidChangeChatSessionOptions: sinon.SinonStub;
 		$onDidChangeChatSessionProviderOptions: sinon.SinonStub;
 		$updateChatSessionInputState: sinon.SinonStub;
+		$authorChatMessage: sinon.SinonStub;
+		$getAvailableModels: sinon.SinonStub;
 	};
 
 	setup(function () {
@@ -1189,6 +1438,8 @@ suite('ExtHostChatSessions', function () {
 			$onDidChangeChatSessionOptions: sinon.stub(),
 			$onDidChangeChatSessionProviderOptions: sinon.stub(),
 			$updateChatSessionInputState: sinon.stub(),
+			$authorChatMessage: sinon.stub(),
+			$getAvailableModels: sinon.stub(),
 		};
 
 		const rpcProtocol = AnyCallRPCProtocol(mainThreadChatSessionsProxy);
@@ -1210,6 +1461,70 @@ suite('ExtHostChatSessions', function () {
 			provideChatSessionContent: async () => session,
 		};
 	}
+
+	test('authorChatMessage forwards model configuration options and revives the result URI', async function () {
+		const sessionResourceDto = { scheme: 'vscode-chat-session', authority: 'local', path: '/test-session' };
+		mainThreadChatSessionsProxy.$authorChatMessage.resolves({ sessionResource: sessionResourceDto });
+
+		const result = await extHostChatSessions.authorChatMessage({
+			message: 'Hello',
+			reasoningEffort: 'high',
+			contextSize: 1_000_000,
+		});
+
+		assert.deepStrictEqual({
+			forwardedOptions: mainThreadChatSessionsProxy.$authorChatMessage.firstCall.args[0],
+			resultSessionResource: result.sessionResource,
+			resultSessionResourceIsUri: URI.isUri(result.sessionResource),
+		}, {
+			forwardedOptions: {
+				message: 'Hello',
+				sessionResource: undefined,
+				model: undefined,
+				agent: undefined,
+				mode: undefined,
+				reasoningEffort: 'high',
+				contextSize: 1_000_000,
+				permissions: undefined,
+			},
+			resultSessionResource: URI.revive(sessionResourceDto),
+			resultSessionResourceIsUri: true,
+		});
+	});
+
+	test('getAvailableModels exposes configuration schemas', async function () {
+		const configurationSchema: vscode.ParticipantForkLanguageModelConfigurationSchema = {
+			properties: {
+				contextSize: {
+					type: 'integer',
+					enum: [16_000, 32_000],
+					default: 32_000,
+				},
+			},
+		};
+		mainThreadChatSessionsProxy.$getAvailableModels.resolves([{
+			id: 'test-model',
+			vendor: 'test-vendor',
+			family: 'test-family',
+			version: '1',
+			name: 'Test Model',
+			maxInputTokens: 1_000_000,
+			maxOutputTokens: 32_000,
+			capabilities: { imageInput: true, toolCalling: true },
+			configurationSchema,
+			isUserSelectable: true,
+		}]);
+
+		const models = await extHostChatSessions.getAvailableModels();
+
+		assert.deepStrictEqual(models.map(model => ({
+			configurationSchema: model.configurationSchema,
+			isFrozen: Object.isFrozen(model),
+		})), [{
+			configurationSchema,
+			isFrozen: true,
+		}]);
+	});
 
 	test('controller only advertises resolve support after resolve handler is assigned', function () {
 		const sessionScheme = 'test-session-type';

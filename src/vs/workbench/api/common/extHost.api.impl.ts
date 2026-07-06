@@ -1082,6 +1082,10 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
 				return extHostChatAgents2.activeChatPanelSessionResource;
 			},
+			get activeChatPanelSession() {
+				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
+				return extHostChatAgents2.activeChatPanelSession;
+			},
 			openChatSession: (sessionResource: vscode.Uri) => {
 				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
 				return extHostChatSessions.openChatSession(sessionResource);
@@ -1090,9 +1094,17 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
 				return extHostChatSessions.sendChatMessage(sessionResource, message);
 			},
+			authorChatMessage: (options: vscode.AuthorChatMessageOptions) => {
+				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
+				return extHostChatSessions.authorChatMessage(options);
+			},
 			onDidChangeActiveChatPanelSessionResource: (listeners, thisArgs?, disposables?) => {
 				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
 				return _asExtensionEvent(extHostChatAgents2.onDidChangeActiveChatPanelSessionResource)(listeners, thisArgs, disposables);
+			},
+			onDidChangeActiveChatPanelSession: (listeners, thisArgs?, disposables?) => {
+				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
+				return _asExtensionEvent(extHostChatAgents2.onDidChangeActiveChatPanelSession)(listeners, thisArgs, disposables);
 			},
 			get browserTabs() {
 				checkProposedApiEnabled(extension, 'browser');
@@ -1819,6 +1831,18 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 				checkProposedApiEnabled(extension, 'chatPromptFiles');
 				return extHostChatAgents2.onDidChangeCustomAgents(listener, thisArgs, disposables);
 			},
+			getAvailableModes(token: vscode.CancellationToken) {
+				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
+				return extHostChatSessions.getAvailableModes() as Thenable<readonly vscode.ChatAvailableMode[]>;
+			},
+			onDidChangeAvailableModes: (listener, thisArgs?, disposables?) => {
+				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
+				return _asExtensionEvent(extHostChatSessions.onDidChangeAvailableModes)(listener, thisArgs, disposables);
+			},
+			getAvailableModels(token: vscode.CancellationToken) {
+				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
+				return extHostChatSessions.getAvailableModels() as Thenable<readonly vscode.ChatAvailableModel[]>;
+			},
 			getInstructions(token: vscode.CancellationToken) {
 				checkProposedApiEnabled(extension, 'chatPromptFiles');
 				return extHostChatAgents2.provideInstructions(token) as Thenable<readonly vscode.ChatInstruction[]>;
@@ -2278,6 +2302,9 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 			ChatRequestNotebookData: extHostTypes.ChatRequestNotebookData,
 			ChatReferenceBinaryData: extHostTypes.ChatReferenceBinaryData,
 			ChatRequestEditedFileEventKind: extHostTypes.ChatRequestEditedFileEventKind,
+			ChatModeKind: extHostTypes.ChatModeKind,
+			AuthorChatMessagePermissions: extHostTypes.AuthorChatMessagePermissions,
+			AuthorChatMessageErrorCode: extHostTypes.AuthorChatMessageErrorCode,
 			LanguageModelChatMessageRole: extHostTypes.LanguageModelChatMessageRole,
 			LanguageModelChatMessage: extHostTypes.LanguageModelChatMessage,
 			LanguageModelChatMessage2: extHostTypes.LanguageModelChatMessage2,

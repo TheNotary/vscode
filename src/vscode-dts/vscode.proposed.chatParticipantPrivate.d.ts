@@ -384,6 +384,380 @@ declare module 'vscode' {
 		export function registerChatParticipantDetectionProvider(participantDetectionProvider: ChatParticipantDetectionProvider): Disposable;
 
 		export const onDidDisposeChatSession: Event<string>;
+
+		/**
+		 * Returns all available chat modes (builtin and custom). Use the
+		 * returned {@link ChatAvailableMode.id} or {@link ChatAvailableMode.name}
+		 * with {@link AuthorChatMessageOptions.mode} to select a specific mode.
+		 */
+		export function getAvailableModes(token: CancellationToken): Thenable<readonly ChatAvailableMode[]>;
+
+		/**
+		 * An event that fires when the set of available modes changes (e.g.,
+		 * a custom `.agent.md` file is added, removed, or modified).
+		 */
+		export const onDidChangeAvailableModes: Event<void>;
+
+		/**
+		 * Returns descriptive information about every language model currently
+		 * registered in the window, across all vendors and providers.
+		 *
+		 * Unlike {@link lm.selectChatModels}, which returns usable
+		 * {@link LanguageModelChat} handles and is therefore limited to models
+		 * whose provider lives in the calling extension host, this returns
+		 * plain descriptors sourced from the window itself. It therefore also
+		 * includes models provided by other extension hosts (e.g. a remote or
+		 * WSL host) and models registered directly by the window, such as
+		 * agent host models.
+		 *
+		 * Use the returned {@link ChatAvailableModel.id},
+		 * {@link ChatAvailableModel.vendor}, {@link ChatAvailableModel.family},
+		 * or {@link ChatAvailableModel.version} to build a selector for
+		 * {@link AuthorChatMessageOptions.model}.
+		 *
+		 * Use {@link lm.onDidChangeChatModels} to be notified when this list
+		 * may have changed.
+		 */
+		export function getAvailableModels(token: CancellationToken): Thenable<readonly ChatAvailableModel[]>;
+	}
+
+	/**
+	 * The kind of a chat mode.
+	 */
+	export enum ChatModeKind {
+		/**
+		 * A question-answering mode.
+		 */
+		Ask = 'ask',
+		/**
+		 * A code-editing mode.
+		 */
+		Edit = 'edit',
+		/**
+		 * An agentic mode.
+		 */
+		Agent = 'agent',
+	}
+
+	/**
+	 * Describes an available chat mode that can be used with
+	 * {@link window.authorChatMessage} or selected in the mode picker.
+	 */
+	export interface ChatAvailableMode {
+		/**
+		 * A stable identifier for this mode. For builtin modes this is
+		 * `'ask'`, `'edit'`, or `'agent'`. For custom modes (defined via
+		 * `.agent.md` files) this is the URI string of the defining file,
+		 * though {@link name} may also be used to reference the mode.
+		 */
+		readonly id: string;
+
+		/**
+		 * The human-readable name of the mode (e.g. `'Ask'`, `'Agent'`,
+		 * `'Plan'`). This value can also be passed to
+		 * {@link AuthorChatMessageOptions.mode} for resolution.
+		 */
+		readonly name: string;
+
+		/**
+		 * An optional description of what this mode does.
+		 */
+		readonly description?: string;
+
+		/**
+		 * The kind of mode. Builtin modes map directly to their kind.
+		 * Custom modes always have kind {@link ChatModeKind.Agent}.
+		 */
+		readonly kind: ChatModeKind;
+
+		/**
+		 * Whether this is a builtin mode (`true` for Ask, Edit, Agent)
+		 * or a custom/user-defined mode (`false`).
+		 */
+		readonly isBuiltin: boolean;
+	}
+
+	/**
+	 * Options for {@link window.authorChatMessage} that control the message
+	 * content, target session, model, agent, and configuration. The
+	 * corresponding UI elements (model picker, permission level, etc.) are
+	 * updated to reflect the specified values before the message is dispatched.
+	 */
+	export interface AuthorChatMessageOptions {
+		/**
+		 * The message text to send.
+		 */
+		message: string;
+
+		/**
+		 * The resource URI of the chat session to target. If `undefined`, a
+		 * new chat session is created automatically.
+		 */
+		sessionResource?: Uri;
+
+		/**
+		 * A language model selector. The first matching model will be selected
+		 * in the model picker before the message is sent.
+		 */
+		model?: LanguageModelChatSelector;
+
+		/**
+		 * The ID of the chat agent to target. The message will be routed to
+		 * this agent without adding an `@` mention to the displayed text.
+		 */
+		agent?: string;
+
+		/**
+		 * The chat mode to select before sending the message. Accepts a mode
+		 * ID (e.g. `'ask'`, `'edit'`, `'agent'`) or a mode name (e.g.
+		 * `'Plan'`). Use {@link chat.getAvailableModes} to discover available
+		 * modes and their identifiers.
+		 *
+		 * When set, the mode picker in the UI is updated to reflect this mode.
+		 * If both {@link mode} and {@link agent} are specified, `mode` controls
+		 * the mode picker selection while `agent` routes the message.
+		 *
+		 * If not set and {@link agent} is specified, defaults to `'agent'` mode.
+		 */
+		mode?: string;
+
+		/**
+		 * The reasoning effort level (e.g. `'low'`, `'medium'`, `'high'`).
+		 * Valid values depend on the selected model's configuration schema.
+		 */
+		reasoningEffort?: string;
+
+		/**
+		 * The context size (max input tokens) to use for this request.
+		 * Valid values depend on the selected model's configuration schema.
+		 */
+		contextSize?: number;
+
+		/**
+		 * The permission level for tool auto-approval.
+		 */
+		permissions?: AuthorChatMessagePermissions;
+	}
+
+	/**
+	 * The permission level for tool auto-approval.
+	 */
+	export enum AuthorChatMessagePermissions {
+		/**
+		 * Use existing auto-approve settings.
+		 */
+		Default = 'default',
+		/**
+		 * Auto-approve all tool calls and retry on errors.
+		 */
+		AutoApprove = 'autoApprove',
+		/**
+		 * Everything AutoApprove does plus continues until the task is done.
+		 */
+		Autopilot = 'autopilot',
+	}
+
+	/**
+	 * Describes a language model that was available during an
+	 * {@link window.authorChatMessage} call.
+	 */
+	export interface AuthorChatMessageModelInfo {
+		readonly id: string;
+		readonly vendor: string;
+		readonly family: string;
+		readonly version: string;
+	}
+
+	/**
+	 * A [JSON Schema](https://json-schema.org) describing configuration options for a language model.
+	 * Each property in `properties` defines a configurable option using standard JSON Schema fields
+	 * plus additional display hints.
+	 *
+	 * This is a self-contained fork of {@link LanguageModelConfigurationSchema} so that
+	 * `chatParticipantPrivate` does not depend on the `chatProvider` proposal.
+	 */
+	export type ParticipantForkLanguageModelConfigurationSchema = {
+		readonly properties?: {
+			readonly [key: string]: Record<string, any> & {
+				/**
+				 * Human-readable labels for enum values, shown instead of the raw values.
+				 * Must have the same length and order as `enum`.
+				 */
+				readonly enumItemLabels?: string[];
+				/**
+				 * The group this property belongs to. When set to `'navigation'`, the property
+				 * is shown as a primary action in the model picker.
+				 */
+				readonly group?: string;
+			};
+		};
+	};
+
+	/**
+	 * Describes a language model registered in the window, as returned by
+	 * {@link chat.getAvailableModels}. This is a descriptor only; to send
+	 * requests to a model use {@link lm.selectChatModels}, or target it in a
+	 * chat session via {@link AuthorChatMessageOptions.model}.
+	 */
+	export interface ChatAvailableModel {
+		/**
+		 * The model identifier, unique per vendor (e.g. `'gpt-4o'`).
+		 * Matches {@link LanguageModelChatSelector.id}.
+		 */
+		readonly id: string;
+
+		/**
+		 * The vendor that provides this model (e.g. `'copilot'`).
+		 * Matches {@link LanguageModelChatSelector.vendor}.
+		 */
+		readonly vendor: string;
+
+		/**
+		 * The opaque family name of the model (e.g. `'gpt-4o'`).
+		 * Matches {@link LanguageModelChatSelector.family}.
+		 */
+		readonly family: string;
+
+		/**
+		 * The opaque version string of the model.
+		 * Matches {@link LanguageModelChatSelector.version}.
+		 */
+		readonly version: string;
+
+		/**
+		 * The human-readable name of the model (e.g. `'GPT-4o'`).
+		 */
+		readonly name: string;
+
+		/**
+		 * An optional human-readable string rendered alongside the model,
+		 * useful for distinguishing models that share a name.
+		 */
+		readonly detail?: string;
+
+		/**
+		 * The maximum number of tokens the model accepts as input.
+		 */
+		readonly maxInputTokens: number;
+
+		/**
+		 * The maximum number of tokens the model can produce.
+		 */
+		readonly maxOutputTokens: number;
+
+		/**
+		 * Features the model supports, such as tool calling or image input.
+		 */
+		readonly capabilities: LanguageModelChatCapabilities;
+
+		/**
+		 * The JSON schema describing the configuration options for this model.
+		 */
+		readonly configurationSchema?: ParticipantForkLanguageModelConfigurationSchema;
+
+		/**
+		 * Whether this model is offered to the user in the model picker.
+		 * Models used only for internal or utility purposes are `false`.
+		 */
+		readonly isUserSelectable: boolean;
+
+		/**
+		 * When set, this model is only offered within chat sessions of the
+		 * given type (e.g. `'copilotcli'`) rather than the general picker.
+		 */
+		readonly targetChatSessionType?: string;
+	}
+
+	/**
+	 * Error codes for {@link AuthorChatMessageError}.
+	 */
+	export enum AuthorChatMessageErrorCode {
+		/**
+		 * The chat session could not be created or loaded.
+		 */
+		SessionAcquisitionFailed = 'sessionAcquisitionFailed',
+		/**
+		 * The chat widget could not be opened or found.
+		 */
+		WidgetUnavailable = 'widgetUnavailable',
+		/**
+		 * No model matched the provided selector.
+		 */
+		ModelNotFound = 'modelNotFound',
+		/**
+		 * The chat service rejected the send request.
+		 */
+		RequestRejected = 'requestRejected',
+	}
+
+	/**
+	 * Error details included in {@link AuthorChatMessageResult.error} when
+	 * the message could not be sent.
+	 */
+	export interface AuthorChatMessageError {
+		/**
+		 * A machine-readable error code.
+		 */
+		readonly code: AuthorChatMessageErrorCode;
+
+		/**
+		 * A human-readable description of the error.
+		 */
+		readonly message: string;
+
+		/**
+		 * When {@link code} is `'modelNotFound'`, the list of models that were
+		 * available at the time of the call. Useful for diagnosing selector mismatches.
+		 */
+		readonly availableModels?: AuthorChatMessageModelInfo[];
+	}
+
+	/**
+	 * Result of {@link window.authorChatMessage}. On success,
+	 * {@link sessionResource} is the session that was used or created and
+	 * {@link error} is `undefined`. On failure, {@link error} contains the
+	 * details and {@link sessionResource} is still available when the session
+	 * was acquired before the error occurred.
+	 */
+	export interface AuthorChatMessageResult {
+		/**
+		 * The resource URI of the chat session that was used or created.
+		 * May be `undefined` when the session itself could not be acquired.
+		 */
+		readonly sessionResource?: Uri;
+
+		/**
+		 * Error details if the message could not be sent. `undefined` on
+		 * success.
+		 */
+		readonly error?: AuthorChatMessageError;
+	}
+
+	/**
+	 * Represents an active chat panel session with live, observable properties.
+	 */
+	export interface ChatPanelSession {
+		/**
+		 * The resource URI that uniquely identifies this chat session.
+		 */
+		readonly resource: Uri;
+
+		/**
+		 * The current title of the chat session. Reading this value always
+		 * returns the latest title. Setting it updates the session's custom
+		 * title, similar to when the system summarizes the initial prompt.
+		 */
+		title: string;
+
+		/**
+		 * Whether a request is currently in progress in this session.
+		 */
+		readonly requestInProgress: boolean;
+
+		/**
+		 * The timestamp (in milliseconds since epoch) of the last message in this session.
+		 */
+		readonly lastMessageDate: number;
 	}
 
 	export namespace window {
@@ -392,6 +766,13 @@ declare module 'vscode' {
 		 * or `undefined` if there is no active chat panel session.
 		 */
 		export const activeChatPanelSessionResource: Uri | undefined;
+
+		/**
+		 * The currently active chat panel session, or `undefined` if there
+		 * is no active chat panel session. The returned object is live —
+		 * its properties always reflect the current state of the session.
+		 */
+		export const activeChatPanelSession: ChatPanelSession | undefined;
 
 		/**
 		 * Opens an existing chat session in the chat panel.
@@ -409,9 +790,28 @@ declare module 'vscode' {
 		export function sendChatMessage(sessionResource: Uri, message: string): Thenable<boolean>;
 
 		/**
+		 * Sends a message to a chat session while also updating the chat panel UI
+		 * to reflect the specified parameters (model, agent, reasoning effort, context
+		 * size, permissions). The session will be opened/revealed if not already visible.
+		 *
+		 * If {@link AuthorChatMessageOptions.sessionResource} is omitted, a new chat
+		 * session is created automatically.
+		 *
+		 * On success, the returned {@link AuthorChatMessageResult} contains the
+		 * session URI and no error. On failure, {@link AuthorChatMessageResult.error}
+		 * contains the details.
+		 */
+		export function authorChatMessage(options: AuthorChatMessageOptions): Thenable<AuthorChatMessageResult>;
+
+		/**
 		 * An event that fires when the active chat panel session resource changes.
 		 */
 		export const onDidChangeActiveChatPanelSessionResource: Event<Uri | undefined>;
+
+		/**
+		 * An event that fires when the active chat panel session changes.
+		 */
+		export const onDidChangeActiveChatPanelSession: Event<ChatPanelSession | undefined>;
 	}
 
 	// #endregion
