@@ -1080,6 +1080,10 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
 				return extHostChatSessions.sendChatMessage(sessionResource, message);
 			},
+			authorChatMessage: (sessionResource: vscode.Uri | null | undefined, message: string, options?: vscode.AuthorChatMessageOptions) => {
+				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
+				return extHostChatSessions.authorChatMessage(sessionResource, message, options);
+			},
 			onDidChangeActiveChatPanelSessionResource: (listeners, thisArgs?, disposables?) => {
 				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
 				return _asExtensionEvent(extHostChatAgents2.onDidChangeActiveChatPanelSessionResource)(listeners, thisArgs, disposables);

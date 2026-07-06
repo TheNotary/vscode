@@ -30,17 +30,18 @@ import { IChatRequestVariableEntry } from '../../contrib/chat/common/attachments
 import { IChatDebugService } from '../../contrib/chat/common/chatDebugService.js';
 import { IChatContentInlineReference, IChatDetail, IChatProgress, IChatService, IChatSessionTiming } from '../../contrib/chat/common/chatService/chatService.js';
 import { ChatSessionOptionsMap, ChatSessionStatus, IChatNewSessionRequest, IChatSession, IChatSessionContentProvider, IChatSessionHistoryItem, IChatSessionItem, IChatSessionItemController, IChatSessionItemsDelta, IChatSessionProviderOptionGroup, IChatSessionProviderOptionItem, IChatSessionRequestHistoryItem, IChatSessionsService, ReadonlyChatSessionOptionsMap } from '../../contrib/chat/common/chatSessionsService.js';
-import { ChatAgentLocation } from '../../contrib/chat/common/constants.js';
+import { ChatAgentLocation, ChatPermissionLevel, isChatPermissionLevel } from '../../contrib/chat/common/constants.js';
 import { IChatModel } from '../../contrib/chat/common/model/chatModel.js';
-import { getChatSessionType } from '../../contrib/chat/common/model/chatUri.js';
+import { getChatSessionType, LocalChatSessionUri } from '../../contrib/chat/common/model/chatUri.js';
 import { IChatAgentRequest } from '../../contrib/chat/common/participants/chatAgents.js';
 import { IChatArtifactsService } from '../../contrib/chat/common/tools/chatArtifactsService.js';
 import { IChatTodoListService } from '../../contrib/chat/common/tools/chatTodoListService.js';
+import { ILanguageModelsService } from '../../contrib/chat/common/languageModels.js';
 import { IEditorGroupsService } from '../../services/editor/common/editorGroupsService.js';
 import { IEditorService } from '../../services/editor/common/editorService.js';
 import { extHostNamedCustomer, IExtHostContext } from '../../services/extensions/common/extHostCustomers.js';
 import { Dto } from '../../services/extensions/common/proxyIdentifier.js';
-import { ChatSessionContentContextDto, ExtHostChatSessionsShape, ExtHostContext, IChatProgressDto, IChatSessionHistoryItemDto, IChatSessionItemsChange, IChatSessionRequestHistoryItemDto, MainContext, MainThreadChatSessionsShape } from '../common/extHost.protocol.js';
+import { ChatSessionContentContextDto, ExtHostChatSessionsShape, ExtHostContext, IAuthorChatMessageOptionsDto, IChatProgressDto, IChatSessionHistoryItemDto, IChatSessionItemsChange, IChatSessionRequestHistoryItemDto, MainContext, MainThreadChatSessionsShape } from '../common/extHost.protocol.js';
 
 function stringOrMarkdownEqual(a: string | IMarkdownString | undefined, b: string | IMarkdownString | undefined): boolean {
 	if (a === b) {
@@ -712,6 +713,7 @@ export class MainThreadChatSessions extends Disposable implements MainThreadChat
 		@IEditorGroupsService private readonly editorGroupService: IEditorGroupsService,
 		@ILogService private readonly _logService: ILogService,
 		@IInstantiationService private readonly _instantiationService: IInstantiationService,
+		@ILanguageModelsService private readonly _languageModelsService: ILanguageModelsService,
 	) {
 		super();
 
@@ -755,6 +757,61 @@ export class MainThreadChatSessions extends Disposable implements MainThreadChat
 		}
 		const result = await this._chatService.sendRequest(resource, message);
 		return result.kind === 'sent';
+	}
+
+	async $authorChatMessage(sessionResource: UriComponents | undefined, message: string, options?: IAuthorChatMessageOptionsDto): Promise<UriComponents | false> {
+		const resource = sessionResource ? URI.revive(sessionResource) : LocalChatSessionUri.getNewSessionUri();
+
+		// Ensure the session is loaded
+		const ref = await this._chatService.acquireOrLoadSession(resource, ChatAgentLocation.Chat, CancellationToken.None, 'ExtHost#authorChatMessage');
+		if (!ref) {
+			return false;
+		}
+
+		// Open/reveal the widget so we can mutate UI state
+		let widget = this._chatWidgetService.getWidgetBySessionResource(resource);
+		if (!widget) {
+			widget = await this._chatWidgetService.openSession(resource, ChatViewPaneTarget) ?? undefined;
+		}
+
+		if (widget && options) {
+			// Set model in the picker
+			if (options.model) {
+				const ids = await this._languageModelsService.selectLanguageModels(options.model);
+				const id = ids.sort().at(0);
+				if (id) {
+					const metadata = this._languageModelsService.lookupLanguageModel(id);
+					if (metadata) {
+						widget.input.setCurrentLanguageModel({ metadata, identifier: id }, true);
+					}
+				}
+			}
+
+			// Set permission level
+			if (options.permissions && isChatPermissionLevel(options.permissions)) {
+				widget.input.setPermissionLevel(options.permissions as ChatPermissionLevel);
+			}
+
+			// Set model configuration (thinking effort, context size)
+			const modelId = widget.input.selectedLanguageModel.get()?.identifier;
+			if (modelId) {
+				const configUpdates: Record<string, unknown> = {};
+				if (options.thinkingEffort !== undefined) {
+					configUpdates['thinkingEffort'] = options.thinkingEffort;
+				}
+				if (options.contextSize !== undefined) {
+					configUpdates['contextSize'] = options.contextSize;
+				}
+				if (Object.keys(configUpdates).length > 0) {
+					await this._languageModelsService.setModelConfiguration(modelId, configUpdates);
+				}
+			}
+		}
+
+		// Send the request with agent targeting if specified
+		const sendOptions = options?.agent ? { agentIdSilent: options.agent } : undefined;
+		const result = await this._chatService.sendRequest(resource, message, sendOptions);
+		return result.kind === 'sent' ? resource : false;
 	}
 
 

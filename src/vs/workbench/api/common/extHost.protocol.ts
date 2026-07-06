@@ -3891,9 +3891,18 @@ export interface IChatSessionItemsChange {
 	readonly removed: readonly UriComponents[];
 }
 
+export interface IAuthorChatMessageOptionsDto {
+	model?: { vendor?: string; family?: string; version?: string; id?: string };
+	agent?: string;
+	thinkingEffort?: string;
+	contextSize?: number;
+	permissions?: 'default' | 'autoApprove' | 'autopilot';
+}
+
 export interface MainThreadChatSessionsShape extends IDisposable {
 	$openChatSession(sessionResource: UriComponents): Promise<boolean>;
 	$sendChatMessage(sessionResource: UriComponents, message: string): Promise<boolean>;
+	$authorChatMessage(sessionResource: UriComponents | undefined, message: string, options?: IAuthorChatMessageOptionsDto): Promise<UriComponents | false>;
 	$registerChatSessionItemController(controllerHandle: number, chatSessionType: string, supportsResolve: boolean): void;
 	$updateChatSessionItemControllerCapabilities(controllerHandle: number, supportsResolve: boolean): void;
 	$unregisterChatSessionItemController(controllerHandle: number): void;
