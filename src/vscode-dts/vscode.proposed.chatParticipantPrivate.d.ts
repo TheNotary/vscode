@@ -426,6 +426,43 @@ declare module 'vscode' {
 		permissions?: 'default' | 'autoApprove' | 'autopilot';
 	}
 
+	/**
+	 * Describes a language model that was available during an
+	 * {@link window.authorChatMessage} call.
+	 */
+	export interface AuthorChatMessageModelInfo {
+		readonly id: string;
+		readonly vendor: string;
+		readonly family: string;
+		readonly version: string;
+	}
+
+	/**
+	 * Error returned by {@link window.authorChatMessage} when the message
+	 * could not be sent. Inspect {@link code} and {@link message} for details.
+	 */
+	export interface AuthorChatMessageError {
+		/**
+		 * A machine-readable error code.
+		 * - `'sessionAcquisitionFailed'`: The chat session could not be created or loaded.
+		 * - `'widgetUnavailable'`: The chat widget could not be opened or found.
+		 * - `'modelNotFound'`: No model matched the provided selector.
+		 * - `'requestRejected'`: The chat service rejected the send request.
+		 */
+		readonly code: 'sessionAcquisitionFailed' | 'widgetUnavailable' | 'modelNotFound' | 'requestRejected';
+
+		/**
+		 * A human-readable description of the error.
+		 */
+		readonly message: string;
+
+		/**
+		 * When {@link code} is `'modelNotFound'`, the list of models that were
+		 * available at the time of the call. Useful for diagnosing selector mismatches.
+		 */
+		readonly availableModels?: AuthorChatMessageModelInfo[];
+	}
+
 	export namespace window {
 		/**
 		 * The resource URI of the currently active chat panel session,
@@ -457,9 +494,11 @@ declare module 'vscode' {
 		 * automatically and used for the message.
 		 *
 		 * Returns the {@link Uri} of the session on success (the existing or newly
-		 * created session), or `false` if the message could not be sent.
+		 * created session), or an {@link AuthorChatMessageError} if the message could
+		 * not be sent. When a model selector is provided but no model matches, the
+		 * error includes the list of available models for diagnostic purposes.
 		 */
-		export function authorChatMessage(sessionResource: Uri | null | undefined, message: string, options?: AuthorChatMessageOptions): Thenable<Uri | false>;
+		export function authorChatMessage(sessionResource: Uri | null | undefined, message: string, options?: AuthorChatMessageOptions): Thenable<Uri | AuthorChatMessageError>;
 
 		/**
 		 * An event that fires when the active chat panel session resource changes.

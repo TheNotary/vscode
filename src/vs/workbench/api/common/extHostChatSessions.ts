@@ -435,14 +435,23 @@ export class ExtHostChatSessions extends Disposable implements ExtHostChatSessio
 		return this._proxy.$sendChatMessage(sessionResource, message);
 	}
 
-	authorChatMessage(sessionResource: vscode.Uri | null | undefined, message: string, options?: vscode.AuthorChatMessageOptions): Promise<vscode.Uri | false> {
+	authorChatMessage(sessionResource: vscode.Uri | null | undefined, message: string, options?: vscode.AuthorChatMessageOptions): Promise<vscode.Uri | vscode.AuthorChatMessageError> {
 		return this._proxy.$authorChatMessage(sessionResource ?? undefined, message, options ? {
 			model: options.model ? { vendor: options.model.vendor, family: options.model.family, version: options.model.version, id: options.model.id } : undefined,
 			agent: options.agent,
 			thinkingEffort: options.thinkingEffort,
 			contextSize: options.contextSize,
 			permissions: options.permissions,
-		} : undefined).then(result => result === false ? false : URI.revive(result));
+		} : undefined).then(result => {
+			if (result.kind === 'success') {
+				return URI.revive(result.sessionResource);
+			}
+			return {
+				code: result.code,
+				message: result.message,
+				availableModels: result.availableModels,
+			} satisfies vscode.AuthorChatMessageError;
+		});
 	}
 
 

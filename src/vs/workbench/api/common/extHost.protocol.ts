@@ -3899,10 +3899,28 @@ export interface IAuthorChatMessageOptionsDto {
 	permissions?: 'default' | 'autoApprove' | 'autopilot';
 }
 
+export interface IAuthorChatMessageModelInfoDto {
+	id: string;
+	vendor: string;
+	family: string;
+	version: string;
+}
+
+export type IAuthorChatMessageResultDto =
+	| { kind: 'success'; sessionResource: UriComponents }
+	| { kind: 'error'; code: AuthorChatMessageErrorCode; message: string; availableModels?: IAuthorChatMessageModelInfoDto[] };
+
+export const enum AuthorChatMessageErrorCode {
+	SessionAcquisitionFailed = 'sessionAcquisitionFailed',
+	WidgetUnavailable = 'widgetUnavailable',
+	ModelNotFound = 'modelNotFound',
+	RequestRejected = 'requestRejected',
+}
+
 export interface MainThreadChatSessionsShape extends IDisposable {
 	$openChatSession(sessionResource: UriComponents): Promise<boolean>;
 	$sendChatMessage(sessionResource: UriComponents, message: string): Promise<boolean>;
-	$authorChatMessage(sessionResource: UriComponents | undefined, message: string, options?: IAuthorChatMessageOptionsDto): Promise<UriComponents | false>;
+	$authorChatMessage(sessionResource: UriComponents | undefined, message: string, options?: IAuthorChatMessageOptionsDto): Promise<IAuthorChatMessageResultDto>;
 	$registerChatSessionItemController(controllerHandle: number, chatSessionType: string, supportsResolve: boolean): void;
 	$updateChatSessionItemControllerCapabilities(controllerHandle: number, supportsResolve: boolean): void;
 	$unregisterChatSessionItemController(controllerHandle: number): void;
