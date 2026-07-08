@@ -28,11 +28,11 @@ import { IChatEditorOptions } from '../../contrib/chat/browser/widgetHosts/edito
 import { ChatEditorInput } from '../../contrib/chat/browser/widgetHosts/editor/chatEditorInput.js';
 import { IChatRequestVariableEntry } from '../../contrib/chat/common/attachments/chatVariableEntries.js';
 import { IChatDebugService } from '../../contrib/chat/common/chatDebugService.js';
-import { IChatContentInlineReference, IChatDetail, IChatProgress, IChatService, IChatSessionTiming } from '../../contrib/chat/common/chatService/chatService.js';
+import { IChatContentInlineReference, IChatDetail, IChatProgress, IChatSendRequestOptions, IChatService, IChatSessionTiming } from '../../contrib/chat/common/chatService/chatService.js';
 import { ChatSessionOptionsMap, ChatSessionStatus, IChatNewSessionRequest, IChatSession, IChatSessionContentProvider, IChatSessionHistoryItem, IChatSessionItem, IChatSessionItemController, IChatSessionItemsDelta, IChatSessionProviderOptionGroup, IChatSessionProviderOptionItem, IChatSessionRequestHistoryItem, IChatSessionsService, ReadonlyChatSessionOptionsMap } from '../../contrib/chat/common/chatSessionsService.js';
 import { ChatAgentLocation, ChatPermissionLevel, isChatPermissionLevel } from '../../contrib/chat/common/constants.js';
 import { IChatModel } from '../../contrib/chat/common/model/chatModel.js';
-import { getChatSessionType, LocalChatSessionUri } from '../../contrib/chat/common/model/chatUri.js';
+import { getChatSessionType } from '../../contrib/chat/common/model/chatUri.js';
 import { IChatAgentRequest } from '../../contrib/chat/common/participants/chatAgents.js';
 import { IChatArtifactsService } from '../../contrib/chat/common/tools/chatArtifactsService.js';
 import { IChatTodoListService } from '../../contrib/chat/common/tools/chatTodoListService.js';
@@ -759,16 +759,44 @@ export class MainThreadChatSessions extends Disposable implements MainThreadChat
 		return result.kind === 'sent';
 	}
 
-	async $authorChatMessage(sessionResource: UriComponents | undefined, message: string, options?: IAuthorChatMessageOptionsDto): Promise<IAuthorChatMessageResultDto> {
-		const resource = sessionResource ? URI.revive(sessionResource) : LocalChatSessionUri.getNewSessionUri();
+	async $authorChatMessage(
+		sessionResource: UriComponents | undefined, message: string,
+		options?: IAuthorChatMessageOptionsDto
+	): Promise<IAuthorChatMessageResultDto> {
+		let resource: URI;
+		let ref;
 
-		this._logService.debug(`[MainThreadChatSessions] authorChatMessage: resource=${resource.toString()}, messageLength=${message.length}, options=${JSON.stringify(options)}`);
+		if (sessionResource) {
+			// Existing session: acquire or load it
+			resource = URI.revive(sessionResource);
 
-		// Ensure the session is loaded
-		const ref = await this._chatService.acquireOrLoadSession(resource, ChatAgentLocation.Chat, CancellationToken.None, 'ExtHost#authorChatMessage');
-		if (!ref) {
-			this._logService.warn(`[MainThreadChatSessions] authorChatMessage: failed to acquire session for resource=${resource.toString()}`);
-			return { kind: 'error', code: AuthorChatMessageErrorCode.SessionAcquisitionFailed, message: `Failed to acquire or load chat session for resource: ${resource.toString()}` };
+			this._logService.debug(
+				`[MainThreadChatSessions] authorChatMessage: resource=${resource.toString()},
+				messageLength=${message.length}, options=${JSON.stringify(options)}`);
+
+			ref = await this._chatService.acquireOrLoadSession(
+				resource, ChatAgentLocation.Chat, CancellationToken.None,
+				'ExtHost#authorChatMessage');
+
+			if (!ref) {
+				this._logService.warn(`[MainThreadChatSessions] authorChatMessage: failed to acquire session for resource=${resource.toString()}`);
+				return {
+					kind: 'error',
+					code: AuthorChatMessageErrorCode.SessionAcquisitionFailed,
+					message: `Failed to acquire or load chat session for resource: ${resource.toString()}`
+				};
+			}
+		} else {
+			// No session provided: create a new local session
+			ref = this._chatService.startNewLocalSession(
+				ChatAgentLocation.Chat,
+				{ debugOwner: 'ExtHost#authorChatMessage' }
+			);
+			resource = ref.object.sessionResource;
+
+			this._logService.debug(
+				`[MainThreadChatSessions] authorChatMessage: created new session resource=${resource.toString()},
+				messageLength=${message.length}, options=${JSON.stringify(options)}`);
 		}
 
 		// Open/reveal the widget so we can mutate UI state
@@ -780,6 +808,7 @@ export class MainThreadChatSessions extends Disposable implements MainThreadChat
 
 		if (!widget) {
 			this._logService.warn(`[MainThreadChatSessions] authorChatMessage: widget unavailable after openSession for resource=${resource.toString()}`);
+			ref.dispose();
 			return { kind: 'error', code: AuthorChatMessageErrorCode.WidgetUnavailable, message: `Chat widget could not be opened for resource: ${resource.toString()}` };
 		}
 
@@ -793,8 +822,18 @@ export class MainThreadChatSessions extends Disposable implements MainThreadChat
 					const allModelIds = this._languageModelsService.getLanguageModelIds();
 					const availableModels = allModelIds.map(modelId => {
 						const meta = this._languageModelsService.lookupLanguageModel(modelId);
-						return meta ? { id: meta.id, vendor: meta.vendor, family: meta.family, version: meta.version } : undefined;
-					}).filter((m): m is { id: string; vendor: string; family: string; version: string } => m !== undefined);
+						return meta ? {
+							id: meta.id,
+							vendor: meta.vendor,
+							family: meta.family,
+							version: meta.version
+						} : undefined;
+					}).filter((m): m is {
+						id: string;
+						vendor: string;
+						family: string;
+						version: string
+					} => m !== undefined);
 
 					this._logService.warn(`[MainThreadChatSessions] authorChatMessage: no models matched selector=${JSON.stringify(options.model)}. Available models: ${JSON.stringify(availableModels)}`);
 					return {
@@ -839,9 +878,17 @@ export class MainThreadChatSessions extends Disposable implements MainThreadChat
 			}
 		}
 
-		// Send the request with agent targeting if specified
-		const sendOptions = options?.agent ? { agentIdSilent: options.agent } : undefined;
+		// Send the request with agent targeting and model selection
+		const selectedModelId = widget?.input.currentLanguageModel;
+		const sendOptions: IChatSendRequestOptions = {
+			agentIdSilent: options?.agent,
+			userSelectedModelId: selectedModelId,
+			userSelectedModelConfiguration: selectedModelId ? widget?.input.getModelConfiguration(selectedModelId) : undefined,
+		};
 		const result = await this._chatService.sendRequest(resource, message, sendOptions);
+
+		// Release our reference — the widget and chat service maintain their own
+		ref.dispose();
 
 		if (result.kind === 'sent') {
 			this._logService.debug(`[MainThreadChatSessions] authorChatMessage: request sent successfully for resource=${resource.toString()}`);
