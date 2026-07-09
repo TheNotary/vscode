@@ -1672,6 +1672,7 @@ export interface MainThreadChatAgentsShape2 extends IChatAgentProgressShape, IDi
 	$unregisterAgent(handle: number): void;
 
 	$transferActiveChatSession(toWorkspace: UriComponents): Promise<void>;
+	$setChatSessionTitle(sessionResource: UriComponents, title: string): void;
 	$provideCustomAgents(token: CancellationToken): Promise<ICustomAgentDto[]>;
 	$provideInstructions(token: CancellationToken): Promise<IInstructionDto[]>;
 	$provideSkills(token: CancellationToken): Promise<ISkillDto[]>;
@@ -1727,6 +1728,13 @@ export interface IChatSessionContextDto {
 	readonly initialSessionOptions?: ReadonlyArray<{ optionId: string; value: string }>;
 }
 
+export interface IActiveChatSessionDto {
+	readonly resource: UriComponents;
+	readonly title: string;
+	readonly requestInProgress: boolean;
+	readonly lastMessageDate: number;
+}
+
 export interface IChatAgentInvokeResult extends IChatAgentResult {
 	/** Error callstack for telemetry only. Stripped at the RPC boundary — never persisted or sent to the model. */
 	errorCallstack?: string;
@@ -1750,7 +1758,7 @@ export interface ExtHostChatAgentsShape2 {
 	$provideSourceFolders(handle: number, sessionResource: UriComponents, type: string, token: CancellationToken): Promise<IChatSessionCustomizationSourceFolderDto[] | undefined>;
 	$setRequestTools(requestId: string, tools: UserSelectedTools): void;
 	$setYieldRequested(requestId: string, value: boolean): void;
-	$acceptActiveChatSession(sessionResource: UriComponents | undefined): void;
+	$acceptActiveChatSession(session: IActiveChatSessionDto | undefined): void;
 	$onDidChangeCustomAgents(): void;
 	$onDidChangeInstructions(): void;
 	$onDidChangeSkills(): void;
@@ -3916,11 +3924,22 @@ export interface IChatSessionItemsChange {
 }
 
 export interface IAuthorChatMessageOptionsDto {
+	message: string;
+	sessionResource?: UriComponents;
 	model?: { vendor?: string; family?: string; version?: string; id?: string };
 	agent?: string;
-	thinkingEffort?: string;
+	mode?: string;
+	reasoningEffort?: string;
 	contextSize?: number;
 	permissions?: 'default' | 'autoApprove' | 'autopilot';
+}
+
+export interface IAvailableModeDto {
+	id: string;
+	name: string;
+	description?: string;
+	kind: 'ask' | 'edit' | 'agent';
+	isBuiltin: boolean;
 }
 
 export interface IAuthorChatMessageModelInfoDto {
@@ -3930,9 +3949,10 @@ export interface IAuthorChatMessageModelInfoDto {
 	version: string;
 }
 
-export type IAuthorChatMessageResultDto =
-	| { kind: 'success'; sessionResource: UriComponents }
-	| { kind: 'error'; code: AuthorChatMessageErrorCode; message: string; availableModels?: IAuthorChatMessageModelInfoDto[] };
+export interface IAuthorChatMessageResultDto {
+	sessionResource?: UriComponents;
+	error?: { code: AuthorChatMessageErrorCode; message: string; availableModels?: IAuthorChatMessageModelInfoDto[] };
+}
 
 export const enum AuthorChatMessageErrorCode {
 	SessionAcquisitionFailed = 'sessionAcquisitionFailed',
@@ -3944,7 +3964,8 @@ export const enum AuthorChatMessageErrorCode {
 export interface MainThreadChatSessionsShape extends IDisposable {
 	$openChatSession(sessionResource: UriComponents): Promise<boolean>;
 	$sendChatMessage(sessionResource: UriComponents, message: string): Promise<boolean>;
-	$authorChatMessage(sessionResource: UriComponents | undefined, message: string, options?: IAuthorChatMessageOptionsDto): Promise<IAuthorChatMessageResultDto>;
+	$authorChatMessage(options: IAuthorChatMessageOptionsDto): Promise<IAuthorChatMessageResultDto>;
+	$getAvailableModes(): Promise<IAvailableModeDto[]>;
 	$registerChatSessionItemController(controllerHandle: number, chatSessionType: string, supportsResolve: boolean): void;
 	$updateChatSessionItemControllerCapabilities(controllerHandle: number, supportsResolve: boolean): void;
 	$unregisterChatSessionItemController(controllerHandle: number): void;
@@ -3977,6 +3998,7 @@ export interface ExtHostChatSessionsShape {
 	$forkChatSession(providerHandle: number, sessionResource: UriComponents, request: IChatSessionRequestHistoryItemDto | undefined, token: CancellationToken): Promise<Dto<IChatSessionItem>>;
 	$resolveChatSessionItem(providerHandle: number, sessionResource: UriComponents, token: CancellationToken): Promise<Dto<IChatSessionItem> | undefined>;
 	$provideChatSessionInputState(controllerHandle: number, sessionResource: UriComponents | undefined, token: CancellationToken): Promise<IChatSessionProviderOptionGroup[] | undefined>;
+	$onDidChangeAvailableModes(): void;
 }
 
 export interface GitRefQueryDto {
