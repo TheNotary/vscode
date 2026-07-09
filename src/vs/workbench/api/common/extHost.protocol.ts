@@ -1670,6 +1670,7 @@ export interface MainThreadChatAgentsShape2 extends IChatAgentProgressShape, IDi
 	$unregisterAgent(handle: number): void;
 
 	$transferActiveChatSession(toWorkspace: UriComponents): Promise<void>;
+	$setChatSessionTitle(sessionResource: UriComponents, title: string): void;
 	$provideCustomAgents(token: CancellationToken): Promise<ICustomAgentDto[]>;
 	$provideInstructions(token: CancellationToken): Promise<IInstructionDto[]>;
 	$provideSkills(token: CancellationToken): Promise<ISkillDto[]>;
@@ -1725,6 +1726,13 @@ export interface IChatSessionContextDto {
 	readonly initialSessionOptions?: ReadonlyArray<{ optionId: string; value: string }>;
 }
 
+export interface IActiveChatSessionDto {
+	readonly resource: UriComponents;
+	readonly title: string;
+	readonly requestInProgress: boolean;
+	readonly lastMessageDate: number;
+}
+
 export interface IChatAgentInvokeResult extends IChatAgentResult {
 	/** Error callstack for telemetry only. Stripped at the RPC boundary — never persisted or sent to the model. */
 	errorCallstack?: string;
@@ -1748,7 +1756,7 @@ export interface ExtHostChatAgentsShape2 {
 	$provideSourceFolders(handle: number, sessionResource: UriComponents, type: string, token: CancellationToken): Promise<IChatSessionCustomizationSourceFolderDto[] | undefined>;
 	$setRequestTools(requestId: string, tools: UserSelectedTools): void;
 	$setYieldRequested(requestId: string, value: boolean): void;
-	$acceptActiveChatSession(sessionResource: UriComponents | undefined): void;
+	$acceptActiveChatSession(session: IActiveChatSessionDto | undefined): void;
 	$onDidChangeCustomAgents(): void;
 	$onDidChangeInstructions(): void;
 	$onDidChangeSkills(): void;

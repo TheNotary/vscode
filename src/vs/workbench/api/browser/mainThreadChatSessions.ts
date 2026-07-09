@@ -30,7 +30,7 @@ import { IChatRequestVariableEntry } from '../../contrib/chat/common/attachments
 import { IChatDebugService } from '../../contrib/chat/common/chatDebugService.js';
 import { IChatContentInlineReference, IChatDetail, IChatProgress, IChatSendRequestOptions, IChatService, IChatSessionTiming } from '../../contrib/chat/common/chatService/chatService.js';
 import { ChatSessionOptionsMap, ChatSessionStatus, IChatNewSessionRequest, IChatSession, IChatSessionContentProvider, IChatSessionHistoryItem, IChatSessionItem, IChatSessionItemController, IChatSessionItemsDelta, IChatSessionProviderOptionGroup, IChatSessionProviderOptionItem, IChatSessionRequestHistoryItem, IChatSessionsService, ReadonlyChatSessionOptionsMap } from '../../contrib/chat/common/chatSessionsService.js';
-import { ChatAgentLocation, ChatPermissionLevel, isChatPermissionLevel } from '../../contrib/chat/common/constants.js';
+import { ChatAgentLocation, ChatModeKind, ChatPermissionLevel, isChatPermissionLevel } from '../../contrib/chat/common/constants.js';
 import { IChatModel } from '../../contrib/chat/common/model/chatModel.js';
 import { getChatSessionType } from '../../contrib/chat/common/model/chatUri.js';
 import { IChatAgentRequest } from '../../contrib/chat/common/participants/chatAgents.js';
@@ -854,6 +854,11 @@ export class MainThreadChatSessions extends Disposable implements MainThreadChat
 				}
 			}
 
+			// Set mode to Agent when an agent is specified
+			if (options.agent) {
+				widget.input.setChatMode(ChatModeKind.Agent, false);
+			}
+
 			// Set permission level
 			if (options.permissions && isChatPermissionLevel(options.permissions)) {
 				widget.input.setPermissionLevel(options.permissions as ChatPermissionLevel);
@@ -878,12 +883,13 @@ export class MainThreadChatSessions extends Disposable implements MainThreadChat
 			}
 		}
 
-		// Send the request with agent targeting and model selection
+		// Send the request with agent targeting, model selection, and mode info
 		const selectedModelId = widget?.input.currentLanguageModel;
 		const sendOptions: IChatSendRequestOptions = {
 			agentIdSilent: options?.agent,
 			userSelectedModelId: selectedModelId,
 			userSelectedModelConfiguration: selectedModelId ? widget?.input.getModelConfiguration(selectedModelId) : undefined,
+			modeInfo: widget?.input.currentModeInfo,
 		};
 		const result = await this._chatService.sendRequest(resource, message, sendOptions);
 

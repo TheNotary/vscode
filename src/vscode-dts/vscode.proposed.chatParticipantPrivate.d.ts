@@ -463,12 +463,46 @@ declare module 'vscode' {
 		readonly availableModels?: AuthorChatMessageModelInfo[];
 	}
 
+	/**
+	 * Represents an active chat panel session with live, observable properties.
+	 */
+	export interface ChatPanelSession {
+		/**
+		 * The resource URI that uniquely identifies this chat session.
+		 */
+		readonly resource: Uri;
+
+		/**
+		 * The current title of the chat session. Reading this value always
+		 * returns the latest title. Setting it updates the session's custom
+		 * title, similar to when the system summarizes the initial prompt.
+		 */
+		title: string;
+
+		/**
+		 * Whether a request is currently in progress in this session.
+		 */
+		readonly requestInProgress: boolean;
+
+		/**
+		 * The timestamp (in milliseconds since epoch) of the last message in this session.
+		 */
+		readonly lastMessageDate: number;
+	}
+
 	export namespace window {
 		/**
 		 * The resource URI of the currently active chat panel session,
 		 * or `undefined` if there is no active chat panel session.
 		 */
 		export const activeChatPanelSessionResource: Uri | undefined;
+
+		/**
+		 * The currently active chat panel session, or `undefined` if there
+		 * is no active chat panel session. The returned object is live —
+		 * its properties always reflect the current state of the session.
+		 */
+		export const activeChatPanelSession: ChatPanelSession | undefined;
 
 		/**
 		 * Opens an existing chat session in the chat panel.
@@ -504,6 +538,11 @@ declare module 'vscode' {
 		 * An event that fires when the active chat panel session resource changes.
 		 */
 		export const onDidChangeActiveChatPanelSessionResource: Event<Uri | undefined>;
+
+		/**
+		 * An event that fires when the active chat panel session changes.
+		 */
+		export const onDidChangeActiveChatPanelSession: Event<ChatPanelSession | undefined>;
 	}
 
 	// #endregion

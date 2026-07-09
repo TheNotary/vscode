@@ -1072,6 +1072,10 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
 				return extHostChatAgents2.activeChatPanelSessionResource;
 			},
+			get activeChatPanelSession() {
+				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
+				return extHostChatAgents2.activeChatPanelSession;
+			},
 			openChatSession: (sessionResource: vscode.Uri) => {
 				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
 				return extHostChatSessions.openChatSession(sessionResource);
@@ -1087,6 +1091,10 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 			onDidChangeActiveChatPanelSessionResource: (listeners, thisArgs?, disposables?) => {
 				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
 				return _asExtensionEvent(extHostChatAgents2.onDidChangeActiveChatPanelSessionResource)(listeners, thisArgs, disposables);
+			},
+			onDidChangeActiveChatPanelSession: (listeners, thisArgs?, disposables?) => {
+				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
+				return _asExtensionEvent(extHostChatAgents2.onDidChangeActiveChatPanelSession)(listeners, thisArgs, disposables);
 			},
 			get browserTabs() {
 				checkProposedApiEnabled(extension, 'browser');
