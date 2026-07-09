@@ -1084,9 +1084,9 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
 				return extHostChatSessions.sendChatMessage(sessionResource, message);
 			},
-			authorChatMessage: (sessionResource: vscode.Uri | null | undefined, message: string, options?: vscode.AuthorChatMessageOptions) => {
+			authorChatMessage: (options: vscode.AuthorChatMessageOptions) => {
 				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
-				return extHostChatSessions.authorChatMessage(sessionResource, message, options);
+				return extHostChatSessions.authorChatMessage(options);
 			},
 			onDidChangeActiveChatPanelSessionResource: (listeners, thisArgs?, disposables?) => {
 				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
@@ -1818,6 +1818,14 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 				checkProposedApiEnabled(extension, 'chatPromptFiles');
 				return extHostChatAgents2.onDidChangeCustomAgents(listener, thisArgs, disposables);
 			},
+			getAvailableModes(token: vscode.CancellationToken) {
+				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
+				return extHostChatSessions.getAvailableModes() as Thenable<readonly vscode.ChatAvailableMode[]>;
+			},
+			onDidChangeAvailableModes: (listener, thisArgs?, disposables?) => {
+				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
+				return _asExtensionEvent(extHostChatSessions.onDidChangeAvailableModes)(listener, thisArgs, disposables);
+			},
 			getInstructions(token: vscode.CancellationToken) {
 				checkProposedApiEnabled(extension, 'chatPromptFiles');
 				return extHostChatAgents2.provideInstructions(token) as Thenable<readonly vscode.ChatInstruction[]>;
@@ -2276,6 +2284,9 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 			ChatRequestNotebookData: extHostTypes.ChatRequestNotebookData,
 			ChatReferenceBinaryData: extHostTypes.ChatReferenceBinaryData,
 			ChatRequestEditedFileEventKind: extHostTypes.ChatRequestEditedFileEventKind,
+			ChatModeKind: extHostTypes.ChatModeKind,
+			AuthorChatMessagePermissions: extHostTypes.AuthorChatMessagePermissions,
+			AuthorChatMessageErrorCode: extHostTypes.AuthorChatMessageErrorCode,
 			LanguageModelChatMessageRole: extHostTypes.LanguageModelChatMessageRole,
 			LanguageModelChatMessage: extHostTypes.LanguageModelChatMessage,
 			LanguageModelChatMessage2: extHostTypes.LanguageModelChatMessage2,
