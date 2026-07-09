@@ -384,15 +384,95 @@ declare module 'vscode' {
 		export function registerChatParticipantDetectionProvider(participantDetectionProvider: ChatParticipantDetectionProvider): Disposable;
 
 		export const onDidDisposeChatSession: Event<string>;
+
+		/**
+		 * Returns all available chat modes (builtin and custom). Use the
+		 * returned {@link ChatAvailableMode.id} or {@link ChatAvailableMode.name}
+		 * with {@link AuthorChatMessageOptions.mode} to select a specific mode.
+		 */
+		export function getAvailableModes(token: CancellationToken): Thenable<readonly ChatAvailableMode[]>;
+
+		/**
+		 * An event that fires when the set of available modes changes (e.g.,
+		 * a custom `.agent.md` file is added, removed, or modified).
+		 */
+		export const onDidChangeAvailableModes: Event<void>;
 	}
 
 	/**
-	 * Options for {@link window.authorChatMessage} that control which model,
-	 * agent, and configuration the message is sent with. The corresponding UI
-	 * elements (model picker, permission level, etc.) are updated to reflect
-	 * the specified values before the message is dispatched.
+	 * The kind of a chat mode.
+	 */
+	export enum ChatModeKind {
+		/**
+		 * A question-answering mode.
+		 */
+		Ask = 'ask',
+		/**
+		 * A code-editing mode.
+		 */
+		Edit = 'edit',
+		/**
+		 * An agentic mode.
+		 */
+		Agent = 'agent',
+	}
+
+	/**
+	 * Describes an available chat mode that can be used with
+	 * {@link window.authorChatMessage} or selected in the mode picker.
+	 */
+	export interface ChatAvailableMode {
+		/**
+		 * A stable identifier for this mode. For builtin modes this is
+		 * `'ask'`, `'edit'`, or `'agent'`. For custom modes (defined via
+		 * `.agent.md` files) this is the URI string of the defining file,
+		 * though {@link name} may also be used to reference the mode.
+		 */
+		readonly id: string;
+
+		/**
+		 * The human-readable name of the mode (e.g. `'Ask'`, `'Agent'`,
+		 * `'Plan'`). This value can also be passed to
+		 * {@link AuthorChatMessageOptions.mode} for resolution.
+		 */
+		readonly name: string;
+
+		/**
+		 * An optional description of what this mode does.
+		 */
+		readonly description?: string;
+
+		/**
+		 * The kind of mode. Builtin modes map directly to their kind.
+		 * Custom modes always have kind {@link ChatModeKind.Agent}.
+		 */
+		readonly kind: ChatModeKind;
+
+		/**
+		 * Whether this is a builtin mode (`true` for Ask, Edit, Agent)
+		 * or a custom/user-defined mode (`false`).
+		 */
+		readonly isBuiltin: boolean;
+	}
+
+	/**
+	 * Options for {@link window.authorChatMessage} that control the message
+	 * content, target session, model, agent, and configuration. The
+	 * corresponding UI elements (model picker, permission level, etc.) are
+	 * updated to reflect the specified values before the message is dispatched.
 	 */
 	export interface AuthorChatMessageOptions {
+		/**
+		 * The message text to send.
+		 */
+		message: string;
+
+		/**
+		 * The resource URI of the chat session to target. If `undefined`, a
+		 * new chat session is created automatically.
+		 */
+		sessionResource?: Uri;
+
 		/**
 		 * A language model selector. The first matching model will be selected
 		 * in the model picker before the message is sent.
@@ -406,10 +486,24 @@ declare module 'vscode' {
 		agent?: string;
 
 		/**
-		 * The thinking effort level (e.g. `'low'`, `'medium'`, `'high'`).
+		 * The chat mode to select before sending the message. Accepts a mode
+		 * ID (e.g. `'ask'`, `'edit'`, `'agent'`) or a mode name (e.g.
+		 * `'Plan'`). Use {@link chat.getAvailableModes} to discover available
+		 * modes and their identifiers.
+		 *
+		 * When set, the mode picker in the UI is updated to reflect this mode.
+		 * If both {@link mode} and {@link agent} are specified, `mode` controls
+		 * the mode picker selection while `agent` routes the message.
+		 *
+		 * If not set and {@link agent} is specified, defaults to `'agent'` mode.
+		 */
+		mode?: string;
+
+		/**
+		 * The reasoning effort level (e.g. `'low'`, `'medium'`, `'high'`).
 		 * Valid values depend on the selected model's configuration schema.
 		 */
-		thinkingEffort?: string;
+		reasoningEffort?: string;
 
 		/**
 		 * The context size (max input tokens) to use for this request.
@@ -419,11 +513,26 @@ declare module 'vscode' {
 
 		/**
 		 * The permission level for tool auto-approval.
-		 * - `'default'`: Use existing auto-approve settings.
-		 * - `'autoApprove'`: Auto-approve all tool calls and retry on errors.
-		 * - `'autopilot'`: Everything autoApprove does plus continues until the task is done.
 		 */
-		permissions?: 'default' | 'autoApprove' | 'autopilot';
+		permissions?: AuthorChatMessagePermissions;
+	}
+
+	/**
+	 * The permission level for tool auto-approval.
+	 */
+	export enum AuthorChatMessagePermissions {
+		/**
+		 * Use existing auto-approve settings.
+		 */
+		Default = 'default',
+		/**
+		 * Auto-approve all tool calls and retry on errors.
+		 */
+		AutoApprove = 'autoApprove',
+		/**
+		 * Everything AutoApprove does plus continues until the task is done.
+		 */
+		Autopilot = 'autopilot',
 	}
 
 	/**
@@ -438,18 +547,36 @@ declare module 'vscode' {
 	}
 
 	/**
-	 * Error returned by {@link window.authorChatMessage} when the message
-	 * could not be sent. Inspect {@link code} and {@link message} for details.
+	 * Error codes for {@link AuthorChatMessageError}.
+	 */
+	export enum AuthorChatMessageErrorCode {
+		/**
+		 * The chat session could not be created or loaded.
+		 */
+		SessionAcquisitionFailed = 'sessionAcquisitionFailed',
+		/**
+		 * The chat widget could not be opened or found.
+		 */
+		WidgetUnavailable = 'widgetUnavailable',
+		/**
+		 * No model matched the provided selector.
+		 */
+		ModelNotFound = 'modelNotFound',
+		/**
+		 * The chat service rejected the send request.
+		 */
+		RequestRejected = 'requestRejected',
+	}
+
+	/**
+	 * Error details included in {@link AuthorChatMessageResult.error} when
+	 * the message could not be sent.
 	 */
 	export interface AuthorChatMessageError {
 		/**
 		 * A machine-readable error code.
-		 * - `'sessionAcquisitionFailed'`: The chat session could not be created or loaded.
-		 * - `'widgetUnavailable'`: The chat widget could not be opened or found.
-		 * - `'modelNotFound'`: No model matched the provided selector.
-		 * - `'requestRejected'`: The chat service rejected the send request.
 		 */
-		readonly code: 'sessionAcquisitionFailed' | 'widgetUnavailable' | 'modelNotFound' | 'requestRejected';
+		readonly code: AuthorChatMessageErrorCode;
 
 		/**
 		 * A human-readable description of the error.
@@ -463,12 +590,67 @@ declare module 'vscode' {
 		readonly availableModels?: AuthorChatMessageModelInfo[];
 	}
 
+	/**
+	 * Result of {@link window.authorChatMessage}. On success,
+	 * {@link sessionResource} is the session that was used or created and
+	 * {@link error} is `undefined`. On failure, {@link error} contains the
+	 * details and {@link sessionResource} is still available when the session
+	 * was acquired before the error occurred.
+	 */
+	export interface AuthorChatMessageResult {
+		/**
+		 * The resource URI of the chat session that was used or created.
+		 * May be `undefined` when the session itself could not be acquired.
+		 */
+		readonly sessionResource?: Uri;
+
+		/**
+		 * Error details if the message could not be sent. `undefined` on
+		 * success.
+		 */
+		readonly error?: AuthorChatMessageError;
+	}
+
+	/**
+	 * Represents an active chat panel session with live, observable properties.
+	 */
+	export interface ChatPanelSession {
+		/**
+		 * The resource URI that uniquely identifies this chat session.
+		 */
+		readonly resource: Uri;
+
+		/**
+		 * The current title of the chat session. Reading this value always
+		 * returns the latest title. Setting it updates the session's custom
+		 * title, similar to when the system summarizes the initial prompt.
+		 */
+		title: string;
+
+		/**
+		 * Whether a request is currently in progress in this session.
+		 */
+		readonly requestInProgress: boolean;
+
+		/**
+		 * The timestamp (in milliseconds since epoch) of the last message in this session.
+		 */
+		readonly lastMessageDate: number;
+	}
+
 	export namespace window {
 		/**
 		 * The resource URI of the currently active chat panel session,
 		 * or `undefined` if there is no active chat panel session.
 		 */
 		export const activeChatPanelSessionResource: Uri | undefined;
+
+		/**
+		 * The currently active chat panel session, or `undefined` if there
+		 * is no active chat panel session. The returned object is live —
+		 * its properties always reflect the current state of the session.
+		 */
+		export const activeChatPanelSession: ChatPanelSession | undefined;
 
 		/**
 		 * Opens an existing chat session in the chat panel.
@@ -487,23 +669,27 @@ declare module 'vscode' {
 
 		/**
 		 * Sends a message to a chat session while also updating the chat panel UI
-		 * to reflect the specified parameters (model, agent, thinking effort, context
+		 * to reflect the specified parameters (model, agent, reasoning effort, context
 		 * size, permissions). The session will be opened/revealed if not already visible.
 		 *
-		 * If `sessionResource` is `null` or `undefined`, a new chat session is created
-		 * automatically and used for the message.
+		 * If {@link AuthorChatMessageOptions.sessionResource} is omitted, a new chat
+		 * session is created automatically.
 		 *
-		 * Returns the {@link Uri} of the session on success (the existing or newly
-		 * created session), or an {@link AuthorChatMessageError} if the message could
-		 * not be sent. When a model selector is provided but no model matches, the
-		 * error includes the list of available models for diagnostic purposes.
+		 * On success, the returned {@link AuthorChatMessageResult} contains the
+		 * session URI and no error. On failure, {@link AuthorChatMessageResult.error}
+		 * contains the details.
 		 */
-		export function authorChatMessage(sessionResource: Uri | null | undefined, message: string, options?: AuthorChatMessageOptions): Thenable<Uri | AuthorChatMessageError>;
+		export function authorChatMessage(options: AuthorChatMessageOptions): Thenable<AuthorChatMessageResult>;
 
 		/**
 		 * An event that fires when the active chat panel session resource changes.
 		 */
 		export const onDidChangeActiveChatPanelSessionResource: Event<Uri | undefined>;
+
+		/**
+		 * An event that fires when the active chat panel session changes.
+		 */
+		export const onDidChangeActiveChatPanelSession: Event<ChatPanelSession | undefined>;
 	}
 
 	// #endregion
