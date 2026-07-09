@@ -30,7 +30,8 @@ import { IChatRequestVariableEntry } from '../../contrib/chat/common/attachments
 import { IChatDebugService } from '../../contrib/chat/common/chatDebugService.js';
 import { IChatContentInlineReference, IChatDetail, IChatProgress, IChatSendRequestOptions, IChatService, IChatSessionTiming } from '../../contrib/chat/common/chatService/chatService.js';
 import { ChatSessionOptionsMap, ChatSessionStatus, IChatNewSessionRequest, IChatSession, IChatSessionContentProvider, IChatSessionHistoryItem, IChatSessionItem, IChatSessionItemController, IChatSessionItemsDelta, IChatSessionProviderOptionGroup, IChatSessionProviderOptionItem, IChatSessionRequestHistoryItem, IChatSessionsService, ReadonlyChatSessionOptionsMap } from '../../contrib/chat/common/chatSessionsService.js';
-import { ChatAgentLocation, ChatPermissionLevel, isChatPermissionLevel } from '../../contrib/chat/common/constants.js';
+import { IChatModeService } from '../../contrib/chat/common/chatModes.js';
+import { ChatAgentLocation, ChatModeKind, ChatPermissionLevel, isChatPermissionLevel } from '../../contrib/chat/common/constants.js';
 import { IChatModel } from '../../contrib/chat/common/model/chatModel.js';
 import { getChatSessionType } from '../../contrib/chat/common/model/chatUri.js';
 import { IChatAgentRequest } from '../../contrib/chat/common/participants/chatAgents.js';
@@ -41,7 +42,7 @@ import { IEditorGroupsService } from '../../services/editor/common/editorGroupsS
 import { IEditorService } from '../../services/editor/common/editorService.js';
 import { extHostNamedCustomer, IExtHostContext } from '../../services/extensions/common/extHostCustomers.js';
 import { Dto } from '../../services/extensions/common/proxyIdentifier.js';
-import { ChatSessionContentContextDto, ExtHostChatSessionsShape, ExtHostContext, AuthorChatMessageErrorCode, IAuthorChatMessageOptionsDto, IAuthorChatMessageResultDto, IChatProgressDto, IChatSessionHistoryItemDto, IChatSessionItemsChange, IChatSessionRequestHistoryItemDto, MainContext, MainThreadChatSessionsShape } from '../common/extHost.protocol.js';
+import { ChatSessionContentContextDto, ExtHostChatSessionsShape, ExtHostContext, AuthorChatMessageErrorCode, IAuthorChatMessageOptionsDto, IAuthorChatMessageResultDto, IAvailableModeDto, IChatProgressDto, IChatSessionHistoryItemDto, IChatSessionItemsChange, IChatSessionRequestHistoryItemDto, MainContext, MainThreadChatSessionsShape } from '../common/extHost.protocol.js';
 
 function stringOrMarkdownEqual(a: string | IMarkdownString | undefined, b: string | IMarkdownString | undefined): boolean {
 	if (a === b) {
@@ -714,6 +715,7 @@ export class MainThreadChatSessions extends Disposable implements MainThreadChat
 		@ILogService private readonly _logService: ILogService,
 		@IInstantiationService private readonly _instantiationService: IInstantiationService,
 		@ILanguageModelsService private readonly _languageModelsService: ILanguageModelsService,
+		@IChatModeService private readonly _chatModeService: IChatModeService,
 	) {
 		super();
 
@@ -737,6 +739,12 @@ export class MainThreadChatSessions extends Disposable implements MainThreadChat
 				}
 			}
 		}));
+
+		this._chatModeService.getLocalModes().then(modes => {
+			this._register(modes.onDidChange(() => {
+				this._proxy.$onDidChangeAvailableModes();
+			}));
+		});
 	}
 
 	private _getHandleForSessionType(chatSessionType: string): number | undefined {
@@ -760,15 +768,15 @@ export class MainThreadChatSessions extends Disposable implements MainThreadChat
 	}
 
 	async $authorChatMessage(
-		sessionResource: UriComponents | undefined, message: string,
-		options?: IAuthorChatMessageOptionsDto
+		options: IAuthorChatMessageOptionsDto
 	): Promise<IAuthorChatMessageResultDto> {
+		const { message, sessionResource: sessionResourceDto } = options;
 		let resource: URI;
 		let ref;
 
-		if (sessionResource) {
+		if (sessionResourceDto) {
 			// Existing session: acquire or load it
-			resource = URI.revive(sessionResource);
+			resource = URI.revive(sessionResourceDto);
 
 			this._logService.debug(
 				`[MainThreadChatSessions] authorChatMessage: resource=${resource.toString()},
@@ -781,9 +789,10 @@ export class MainThreadChatSessions extends Disposable implements MainThreadChat
 			if (!ref) {
 				this._logService.warn(`[MainThreadChatSessions] authorChatMessage: failed to acquire session for resource=${resource.toString()}`);
 				return {
-					kind: 'error',
-					code: AuthorChatMessageErrorCode.SessionAcquisitionFailed,
-					message: `Failed to acquire or load chat session for resource: ${resource.toString()}`
+					error: {
+						code: AuthorChatMessageErrorCode.SessionAcquisitionFailed,
+						message: `Failed to acquire or load chat session for resource: ${resource.toString()}`
+					}
 				};
 			}
 		} else {
@@ -809,81 +818,91 @@ export class MainThreadChatSessions extends Disposable implements MainThreadChat
 		if (!widget) {
 			this._logService.warn(`[MainThreadChatSessions] authorChatMessage: widget unavailable after openSession for resource=${resource.toString()}`);
 			ref.dispose();
-			return { kind: 'error', code: AuthorChatMessageErrorCode.WidgetUnavailable, message: `Chat widget could not be opened for resource: ${resource.toString()}` };
+			return { sessionResource: resource, error: { code: AuthorChatMessageErrorCode.WidgetUnavailable, message: `Chat widget could not be opened for resource: ${resource.toString()}` } };
 		}
 
-		if (options) {
-			// Set model in the picker
-			if (options.model) {
-				const ids = await this._languageModelsService.selectLanguageModels(options.model);
-				this._logService.debug(`[MainThreadChatSessions] authorChatMessage: model selector=${JSON.stringify(options.model)}, matchedIds=[${ids.join(', ')}]`);
+		// Set chat panel UX state
 
-				if (ids.length === 0) {
-					const allModelIds = this._languageModelsService.getLanguageModelIds();
-					const availableModels = allModelIds.map(modelId => {
-						const meta = this._languageModelsService.lookupLanguageModel(modelId);
-						return meta ? {
-							id: meta.id,
-							vendor: meta.vendor,
-							family: meta.family,
-							version: meta.version
-						} : undefined;
-					}).filter((m): m is {
-						id: string;
-						vendor: string;
-						family: string;
-						version: string
-					} => m !== undefined);
+		// Set model in the picker
+		if (options.model) {
+			const ids = await this._languageModelsService.selectLanguageModels(options.model);
+			this._logService.debug(`[MainThreadChatSessions] authorChatMessage: model selector=${JSON.stringify(options.model)}, matchedIds=[${ids.join(', ')}]`);
 
-					this._logService.warn(`[MainThreadChatSessions] authorChatMessage: no models matched selector=${JSON.stringify(options.model)}. Available models: ${JSON.stringify(availableModels)}`);
-					return {
-						kind: 'error',
+			if (ids.length === 0) {
+				const allModelIds = this._languageModelsService.getLanguageModelIds();
+				const availableModels = allModelIds.map(modelId => {
+					const meta = this._languageModelsService.lookupLanguageModel(modelId);
+					return meta ? {
+						id: meta.id,
+						vendor: meta.vendor,
+						family: meta.family,
+						version: meta.version
+					} : undefined;
+				}).filter((m): m is {
+					id: string;
+					vendor: string;
+					family: string;
+					version: string;
+				} => m !== undefined);
+
+				this._logService.warn(`[MainThreadChatSessions] authorChatMessage: no models matched selector=${JSON.stringify(options.model)}. Available models: ${JSON.stringify(availableModels)}`);
+				return {
+					sessionResource: resource,
+					error: {
 						code: AuthorChatMessageErrorCode.ModelNotFound,
 						message: `No language model matched the selector: ${JSON.stringify(options.model)}. ${availableModels.length} model(s) available.`,
 						availableModels,
-					};
-				}
-
-				const id = ids.sort().at(0)!;
-				const metadata = this._languageModelsService.lookupLanguageModel(id);
-				if (metadata) {
-					this._logService.trace(`[MainThreadChatSessions] authorChatMessage: setting model to id=${id}, name=${metadata.id}, vendor=${metadata.vendor}, family=${metadata.family}`);
-					widget.input.setCurrentLanguageModel({ metadata, identifier: id }, true);
-				} else {
-					this._logService.warn(`[MainThreadChatSessions] authorChatMessage: lookupLanguageModel returned undefined for matched id=${id}`);
-				}
+					},
+				};
 			}
 
-			// Set permission level
-			if (options.permissions && isChatPermissionLevel(options.permissions)) {
-				widget.input.setPermissionLevel(options.permissions as ChatPermissionLevel);
-			}
-
-			// Set model configuration (thinking effort, context size)
-			const modelId = widget.input.selectedLanguageModel.get()?.identifier;
-			if (modelId) {
-				const configUpdates: Record<string, unknown> = {};
-				if (options.thinkingEffort !== undefined) {
-					configUpdates['thinkingEffort'] = options.thinkingEffort;
-				}
-				if (options.contextSize !== undefined) {
-					configUpdates['contextSize'] = options.contextSize;
-				}
-				if (Object.keys(configUpdates).length > 0) {
-					this._logService.trace(`[MainThreadChatSessions] authorChatMessage: applying model config for modelId=${modelId}: ${JSON.stringify(configUpdates)}`);
-					await this._languageModelsService.setModelConfiguration(modelId, configUpdates);
-				}
-			} else if (options.thinkingEffort !== undefined || options.contextSize !== undefined) {
-				this._logService.trace(`[MainThreadChatSessions] authorChatMessage: skipping model config (thinkingEffort/contextSize) because no model is selected`);
+			const id = ids.sort().at(0)!;
+			const metadata = this._languageModelsService.lookupLanguageModel(id);
+			if (metadata) {
+				this._logService.trace(`[MainThreadChatSessions] authorChatMessage: setting model to id=${id}, name=${metadata.id}, vendor=${metadata.vendor}, family=${metadata.family}`);
+				widget.input.setCurrentLanguageModel({ metadata, identifier: id }, true);
+			} else {
+				this._logService.warn(`[MainThreadChatSessions] authorChatMessage: lookupLanguageModel returned undefined for matched id=${id}`);
 			}
 		}
 
-		// Send the request with agent targeting and model selection
+		// Set chat mode: explicit mode takes precedence, otherwise default to Agent when agent is specified
+		if (options.mode) {
+			widget.input.setChatMode(options.mode, false);
+		} else if (options.agent) {
+			widget.input.setChatMode(ChatModeKind.Agent, false);
+		}
+
+		// Set permission level
+		if (options.permissions && isChatPermissionLevel(options.permissions)) {
+			widget.input.setPermissionLevel(options.permissions as ChatPermissionLevel);
+		}
+
+		// Set model configuration (reasoning effort, context size)
+		const modelId = widget.input.selectedLanguageModel.get()?.identifier;
+		if (modelId) {
+			const configUpdates: Record<string, unknown> = {};
+			if (options.reasoningEffort !== undefined) {
+				configUpdates['thinkingEffort'] = options.reasoningEffort;
+			}
+			if (options.contextSize !== undefined) {
+				configUpdates['contextSize'] = options.contextSize;
+			}
+			if (Object.keys(configUpdates).length > 0) {
+				this._logService.trace(`[MainThreadChatSessions] authorChatMessage: applying model config for modelId=${modelId}: ${JSON.stringify(configUpdates)}`);
+				await this._languageModelsService.setModelConfiguration(modelId, configUpdates);
+			}
+		} else if (options.reasoningEffort !== undefined || options.contextSize !== undefined) {
+			this._logService.trace(`[MainThreadChatSessions] authorChatMessage: skipping model config (reasoningEffort/contextSize) because no model is selected`);
+		}
+
+		// Send the request with agent targeting, model selection, and mode info
 		const selectedModelId = widget?.input.currentLanguageModel;
 		const sendOptions: IChatSendRequestOptions = {
-			agentIdSilent: options?.agent,
+			agentIdSilent: options.agent,
 			userSelectedModelId: selectedModelId,
 			userSelectedModelConfiguration: selectedModelId ? widget?.input.getModelConfiguration(selectedModelId) : undefined,
+			modeInfo: widget?.input.currentModeInfo,
 		};
 		const result = await this._chatService.sendRequest(resource, message, sendOptions);
 
@@ -892,12 +911,39 @@ export class MainThreadChatSessions extends Disposable implements MainThreadChat
 
 		if (result.kind === 'sent') {
 			this._logService.debug(`[MainThreadChatSessions] authorChatMessage: request sent successfully for resource=${resource.toString()}`);
-			return { kind: 'success', sessionResource: resource };
+			return { sessionResource: resource };
 		}
 
 		const reason = result.kind === 'rejected' ? result.reason : `request queued (kind=${result.kind})`;
 		this._logService.warn(`[MainThreadChatSessions] authorChatMessage: sendRequest not sent, kind=${result.kind}, reason=${reason}`);
-		return { kind: 'error', code: AuthorChatMessageErrorCode.RequestRejected, message: `Chat request was not sent: ${reason}` };
+		return { sessionResource: resource, error: { code: AuthorChatMessageErrorCode.RequestRejected, message: `Chat request was not sent: ${reason}` } };
+	}
+
+	async $getAvailableModes(): Promise<IAvailableModeDto[]> {
+		const chatModes = await this._chatModeService.getLocalModes();
+		const result: IAvailableModeDto[] = [];
+
+		for (const mode of chatModes.builtin) {
+			result.push({
+				id: mode.id,
+				name: mode.name.get(),
+				description: mode.description?.get(),
+				kind: mode.kind,
+				isBuiltin: true,
+			});
+		}
+
+		for (const mode of chatModes.custom) {
+			result.push({
+				id: mode.id,
+				name: mode.name.get(),
+				description: mode.description?.get(),
+				kind: mode.kind,
+				isBuiltin: false,
+			});
+		}
+
+		return result;
 	}
 
 
