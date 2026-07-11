@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import type * as vscode from 'vscode';
 import { CancellationToken, CancellationTokenSource } from '../../../../base/common/cancellation.js';
 import { Emitter } from '../../../../base/common/event.js';
 import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
@@ -16,10 +17,13 @@ import { IAuthenticationAccessService } from '../../../services/authentication/b
 import { ILanguageModelIgnoredFilesService } from '../../../contrib/chat/common/ignoredFiles.js';
 import { ILanguageModelChatProvider, ILanguageModelsService, IChatMessage } from '../../../contrib/chat/common/languageModels.js';
 import { SerializableObjectWithBuffers } from '../../../services/extensions/common/proxyIdentifier.js';
+import { nullExtensionDescription } from '../../../services/extensions/common/extensions.js';
 import { TestExtensionService } from '../../../test/common/workbenchTestServices.js';
 import { MainThreadLanguageModels } from '../../browser/mainThreadLanguageModels.js';
 import { ExtHostLanguageModelsShape } from '../../common/extHost.protocol.js';
-import { SingleProxyRPCProtocol } from '../common/testRPCProtocol.js';
+import { IExtHostAuthentication } from '../../common/extHostAuthentication.js';
+import { ExtHostLanguageModels } from '../../common/extHostLanguageModels.js';
+import { AnyCallRPCProtocol, SingleProxyRPCProtocol } from '../common/testRPCProtocol.js';
 
 suite('MainThreadLanguageModels', function () {
 
@@ -206,5 +210,110 @@ suite('MainThreadLanguageModels', function () {
 		cts.cancel();
 
 		assert.strictEqual(cancelCount, 0);
+	});
+});
+
+suite('ExtHostLanguageModels', function () {
+
+	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('selectLanguageModels exposes provider configuration schemas', async () => {
+		const fastConfigurationSchema: vscode.LanguageModelConfigurationSchema = {
+			properties: {
+				thinkingEffort: {
+					type: 'string',
+					enum: ['minimal', 'low'],
+					enumItemLabels: ['Minimal', 'Low'],
+					default: 'minimal',
+				},
+				contextSize: {
+					type: 'integer',
+					enum: [16000, 32000],
+					enumItemLabels: ['16K', '32K'],
+					default: 32000,
+					minimum: 1000,
+					maximum: 32000,
+					multipleOf: 1000,
+				},
+			},
+		};
+		const deepConfigurationSchema: vscode.LanguageModelConfigurationSchema = {
+			properties: {
+				thinkingEffort: {
+					type: 'string',
+					enum: ['medium', 'high'],
+					enumItemLabels: ['Medium', 'High'],
+					default: 'high',
+				},
+				contextSize: {
+					type: 'integer',
+					enum: [64000, 128000],
+					enumItemLabels: ['64K', '128K'],
+					default: 128000,
+					minimum: 8000,
+					maximum: 128000,
+					multipleOf: 8000,
+				},
+			},
+		};
+		const rpcProtocol = AnyCallRPCProtocol({
+			$selectChatModels: async () => {
+				const models = await languageModels.$provideLanguageModelChatInfo('test', { silent: false }, CancellationToken.None);
+				return models.map(model => model.identifier);
+			},
+		});
+		const languageModels = disposables.add(new ExtHostLanguageModels(rpcProtocol, new NullLogService(), new class extends mock<IExtHostAuthentication>() { }));
+
+		disposables.add(languageModels.registerLanguageModelChatProvider(nullExtensionDescription, 'test', {
+			provideLanguageModelChatInformation: async () => [{
+				id: 'fast',
+				name: 'Fast',
+				family: 'test',
+				version: '1',
+				maxInputTokens: 32000,
+				maxOutputTokens: 4000,
+				capabilities: {},
+				configurationSchema: fastConfigurationSchema,
+			}, {
+				id: 'deep',
+				name: 'Deep',
+				family: 'test',
+				version: '1',
+				maxInputTokens: 128000,
+				maxOutputTokens: 16000,
+				capabilities: {},
+				configurationSchema: deepConfigurationSchema,
+			}, {
+				id: 'schema-less',
+				name: 'Schema-less',
+				family: 'test',
+				version: '1',
+				maxInputTokens: 32000,
+				maxOutputTokens: 4000,
+				capabilities: {},
+			}],
+			provideLanguageModelChatResponse: async () => { },
+			provideTokenCount: async () => 0,
+		}));
+
+		const models = await languageModels.selectLanguageModels(nullExtensionDescription, { vendor: 'test' });
+
+		assert.deepStrictEqual(models.map(model => ({
+			id: model.id,
+			configurationSchema: model.configurationSchema,
+			isFrozen: Object.isFrozen(model),
+		})), [{
+			id: 'fast',
+			configurationSchema: fastConfigurationSchema,
+			isFrozen: true,
+		}, {
+			id: 'deep',
+			configurationSchema: deepConfigurationSchema,
+			isFrozen: true,
+		}, {
+			id: 'schema-less',
+			configurationSchema: undefined,
+			isFrozen: true,
+		}]);
 	});
 });
