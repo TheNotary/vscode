@@ -464,6 +464,7 @@ export class ExtHostLanguageModels implements ExtHostLanguageModelsShape {
 				editToolsHint: model.metadata.capabilities?.editTools,
 			},
 			maxInputTokens: model.metadata.maxInputTokens,
+			configurationSchema: model.metadata.configurationSchema as vscode.LanguageModelConfigurationSchema | undefined,
 			countTokens(text, token) {
 				if (!that._localModels.has(modelId)) {
 					throw extHostTypes.LanguageModelError.NotFound(modelId);

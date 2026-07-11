@@ -5,6 +5,15 @@
 
 declare module 'vscode' {
 
+	export interface LanguageModelChat {
+		/**
+		 * The JSON schema describing the configuration options for this model.
+		 * This is the same schema contributed by the model's provider through
+		 * {@linkcode LanguageModelChatInformation.configurationSchema}.
+		 */
+		readonly configurationSchema?: LanguageModelConfigurationSchema;
+	}
+
 	/**
 	* The provider version of {@linkcode LanguageModelChatRequestOptions}
 	*/
