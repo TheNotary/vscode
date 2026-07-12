@@ -890,7 +890,7 @@ export class MainThreadChatSessions extends Disposable implements MainThreadChat
 			}
 			if (Object.keys(configUpdates).length > 0) {
 				this._logService.trace(`[MainThreadChatSessions] authorChatMessage: applying model config for modelId=${modelId}: ${JSON.stringify(configUpdates)}`);
-				await this._languageModelsService.setModelConfiguration(modelId, configUpdates);
+				await widget.input.setModelConfiguration(modelId, configUpdates);
 			}
 		} else if (options.reasoningEffort !== undefined || options.contextSize !== undefined) {
 			this._logService.trace(`[MainThreadChatSessions] authorChatMessage: skipping model config (reasoningEffort/contextSize) because no model is selected`);
