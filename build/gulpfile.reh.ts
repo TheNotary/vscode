@@ -534,9 +534,16 @@ function packageTask(type: string, platform: string, arch: string, sourceFolderN
 }
 
 function hasAuthenticodeSignature(filePath: string): Promise<boolean> {
-	return new Promise((resolve, reject) => {
+	return new Promise((resolve, _reject) => {
 		const proc = cp.spawn('signtool.exe', ['verify', '/pa', filePath]);
-		proc.on('error', reject);
+		proc.on('error', err => {
+			// signtool.exe not available (e.g. Windows SDK not installed in CI) — assume no signature
+			if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+				resolve(false);
+			} else {
+				_reject(err);
+			}
+		});
 		proc.on('exit', code => resolve(code === 0));
 	});
 }
@@ -569,11 +576,18 @@ function patchWin32DependenciesTask(destinationFolderName: string) {
 	const cwd = path.join(BUILD_ROOT, destinationFolderName);
 
 	return async () => {
+		// Some dependencies (e.g. @anthropic-ai/claude-agent-sdk) vendor prebuilt
+		// native binaries for multiple platforms/architectures side by side (in
+		// folders like `x64-linux` or `arm64-darwin`). Only Windows PE binaries can
+		// be patched with rcedit, so skip any `.node` file that lives under a
+		// non-Windows platform-specific vendor folder.
+		const nonWindowsVendorFolder = /[\\/](?:arm64|x64|ia32)-(?:linux|darwin)[\\/]/;
+
 		const deps = (await Promise.all([
 			promisify(glob)('**/*.node', { cwd }),
 			promisify(glob)('**/rg.exe', { cwd }),
 			promisify(glob)('**/tgrep.exe', { cwd }),
-		])).flatMap(o => o);
+		])).flatMap(o => o).filter(dep => !nonWindowsVendorFolder.test(dep));
 		const packageJsonContents = JSON.parse(await fs.promises.readFile(path.join(cwd, 'package.json'), 'utf8'));
 		const productContents = JSON.parse(await fs.promises.readFile(path.join(cwd, 'product.json'), 'utf8'));
 		const baseVersion = packageJsonContents.version.replace(/-.*$/, '');
