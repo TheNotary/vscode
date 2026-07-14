@@ -1,0 +1,85 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.cli-logs-editor {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	overflow: hidden;
+}
+
+.cli-logs-editor .cli-logs-header {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	justify-content: space-between;
+	padding: var(--vscode-spacing-size80) var(--vscode-spacing-size120);
+	border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border);
+}
+
+.cli-logs-editor .cli-logs-header .cli-logs-title {
+	font-weight: 600;
+	font-size: var(--vscode-bodyFontSize);
+}
+
+.cli-logs-editor .cli-logs-table {
+	flex: 1;
+	overflow: hidden;
+}
+
+/* Error row styling */
+.cli-logs-editor .cli-row-error {
+	color: var(--vscode-list-errorForeground);
+}
+
+/* Group header row */
+.cli-logs-editor .cli-group-header {
+	display: flex;
+	align-items: center;
+	padding: var(--vscode-spacing-size40) var(--vscode-spacing-size80);
+	background-color: var(--vscode-sideBarSectionHeader-background);
+	font-size: var(--vscode-bodyFontSize-small);
+	color: var(--vscode-sideBarSectionHeader-foreground);
+	gap: var(--vscode-spacing-size40);
+}
+
+.cli-logs-editor .cli-group-header .codicon {
+	font-size: var(--vscode-bodyFontSize-small);
+}
+
+/* Monospace cells for command and arguments */
+.cli-logs-editor .cli-command-cell,
+.cli-logs-editor .cli-args-cell {
+	font-family: var(--monaco-monospace-font);
+	font-size: var(--editor-font-size);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Status icon column */
+.cli-logs-editor .cli-status-cell {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.cli-logs-editor .cli-status-cell .codicon-error {
+	color: var(--vscode-list-errorForeground);
+}
+
+.cli-logs-editor .cli-status-cell .codicon-pass {
+	color: var(--vscode-testing-iconPassed);
+}
+
+/* Empty state */
+.cli-logs-editor .cli-logs-empty {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 100%;
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-bodyFontSize);
+}
