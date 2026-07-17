@@ -109,9 +109,8 @@
 		{
 			"name": "ms-vscode-remote.remote-containers",
 			"version": "0.467.0",
-			"sha256": {},
+			"sha256": "b3bd40702da5dd7d1a99aac697da5c437f28deeec899d0bb6e78dd76a5c1b012",
 			"repo": "https://github.com/microsoft/vscode-remote-release",
-			"platformSpecific": true,
 			"metadata": {
 				"id": "93ce222b-5f6f-49b7-9ab1-a0463c6238df",
 				"publisherId": {
