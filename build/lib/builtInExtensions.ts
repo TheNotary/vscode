@@ -19,9 +19,10 @@ import { patchBuiltInRemoteWsl } from './patchRemoteWsl.ts';
 export interface IExtensionDefinition {
 	name: string;
 	version: string;
-	sha256: string;
+	sha256: string | Record<string, string>;
 	repo: string;
 	platforms?: string[];
+	platformSpecific?: boolean;
 	vsix?: string;
 	metadata: {
 		id: string;
@@ -41,6 +42,16 @@ const builtInExtensions = productjson.builtInExtensions as IExtensionDefinition[
 const webBuiltInExtensions = productjson.webBuiltInExtensions as IExtensionDefinition[] || [];
 const controlFilePath = path.join(os.homedir(), '.vscode-oss-dev', 'extensions', 'control.json');
 const ENABLE_LOGGING = !process.env['VSCODE_BUILD_BUILTIN_EXTENSIONS_SILENCE_PLEASE'];
+
+/**
+ * Computes the marketplace targetPlatform string (e.g. 'win32-x64') from
+ * environment variables or the current host platform/arch.
+ */
+export function getMarketplaceTargetPlatform(): string {
+	const platform = process.env['VSCODE_PLATFORM'] || process.platform;
+	const arch = process.env['VSCODE_ARCH'] || process.arch;
+	return `${platform}-${arch}`;
+}
 
 function log(...messages: string[]): void {
 	if (ENABLE_LOGGING) {
@@ -63,19 +74,38 @@ function isUpToDate(extension: IExtensionDefinition): boolean {
 
 	try {
 		const diskVersion = JSON.parse(packageContents).version;
-		return (diskVersion === extension.version);
+		if (diskVersion !== extension.version) {
+			return false;
+		}
 	} catch (err) {
 		return false;
 	}
+
+	// For platform-specific extensions, check that the cached copy matches the target platform
+	if (extension.platformSpecific) {
+		const platformMarkerPath = path.join(getExtensionPath(extension), '.targetPlatform');
+		const expectedPlatform = getMarketplaceTargetPlatform();
+		if (!fs.existsSync(platformMarkerPath)) {
+			return false;
+		}
+		const cachedPlatform = fs.readFileSync(platformMarkerPath, 'utf8').trim();
+		if (cachedPlatform !== expectedPlatform) {
+			return false;
+		}
+	}
+
+	return true;
 }
 
 function getExtensionDownloadStream(extension: IExtensionDefinition) {
 	let input: Stream;
 
+	const targetPlatform = extension.platformSpecific ? getMarketplaceTargetPlatform() : undefined;
+
 	if (extension.vsix) {
 		input = ext.fromVsix(path.join(root, extension.vsix), extension);
 	} else if (productjson.extensionsGallery?.serviceUrl) {
-		input = ext.fromMarketplace(productjson.extensionsGallery.serviceUrl, extension);
+		input = ext.fromMarketplace(productjson.extensionsGallery.serviceUrl, extension, targetPlatform);
 	} else {
 		input = ext.fromGithub(extension);
 	}
@@ -106,7 +136,15 @@ function syncMarketplaceExtension(extension: IExtensionDefinition): Stream {
 
 	return getExtensionDownloadStream(extension)
 		.pipe(vfs.dest('.build/builtInExtensions'))
-		.on('end', () => log(source, extension.name, ansiColors.green('✔︎')));
+		.on('end', () => {
+			// Write a platform marker for platform-specific extensions so we can
+			// invalidate the cache when the target platform changes.
+			if (extension.platformSpecific) {
+				const markerPath = path.join(getExtensionPath(extension), '.targetPlatform');
+				fs.writeFileSync(markerPath, getMarketplaceTargetPlatform());
+			}
+			log(source, extension.name, ansiColors.green('✔︎'));
+		});
 }
 
 function syncExtension(extension: IExtensionDefinition, controlState: 'disabled' | 'marketplace'): Stream {

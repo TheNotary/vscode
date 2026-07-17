@@ -63,6 +63,7 @@ jobs:
     env:
       VSCODE_QUALITY: 'stable'
       VSCODE_ARCH: ${{ inputs.arch }}
+      VSCODE_PLATFORM: ${{ inputs.platform }}
       BUILD_SOURCEVERSION: ${{ inputs.upstream_commit_sha }}
     steps:
       - name: Checkout

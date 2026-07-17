@@ -228,20 +228,31 @@ const baseHeaders = {
 	'X-Market-User-Id': '291C1CD0-051A-4123-9B4B-30D60EF52EE2',
 };
 
-export function fromMarketplace(serviceUrl: string, { name: extensionName, version, sha256, metadata }: IExtensionDefinition): Stream {
+export function fromMarketplace(serviceUrl: string, { name: extensionName, version, sha256, metadata }: IExtensionDefinition, targetPlatform?: string): Stream {
 	const [publisher, name] = extensionName.split('.');
-	const url = `${serviceUrl}/publishers/${publisher}/vsextensions/${name}/${version}/vspackage`;
+	let url = `${serviceUrl}/publishers/${publisher}/vsextensions/${name}/${version}/vspackage`;
+	if (targetPlatform) {
+		url += `?targetPlatform=${targetPlatform}`;
+	}
 
-	fancyLog('Downloading extension:', ansiColors.yellow(`${extensionName}@${version}`), '...');
+	fancyLog('Downloading extension:', ansiColors.yellow(`${extensionName}@${version}`), targetPlatform ? `(${targetPlatform})` : '', '...');
 
 	const packageJsonFilter = filter('package.json', { restore: true });
+
+	// Resolve checksum: platform-specific extensions may have per-platform sha256 values
+	let checksumSha256: string | undefined;
+	if (typeof sha256 === 'string') {
+		checksumSha256 = sha256;
+	} else if (targetPlatform && sha256[targetPlatform]) {
+		checksumSha256 = sha256[targetPlatform];
+	}
 
 	return fetchUrls('', {
 		base: url,
 		nodeFetchOptions: {
 			headers: baseHeaders
 		},
-		checksumSha256: sha256
+		checksumSha256
 	})
 		.pipe(vinylZip.src())
 		.pipe(filter('extension/**'))
@@ -256,15 +267,18 @@ export function fromVsix(vsixPath: string, { name: extensionName, version, sha25
 	fancyLog('Using local VSIX for extension:', ansiColors.yellow(`${extensionName}@${version}`), '...');
 
 	const packageJsonFilter = filter('package.json', { restore: true });
+	const expectedChecksum = typeof sha256 === 'string' ? sha256 : undefined;
 
 	return gulp.src(vsixPath)
 		.pipe(buffer())
 		.pipe(es.mapSync((f: File) => {
-			const hash = crypto.createHash('sha256');
-			hash.update(f.contents as Buffer);
-			const checksum = hash.digest('hex');
-			if (checksum !== sha256) {
-				throw new Error(`Checksum mismatch for ${vsixPath} (expected ${sha256}, actual ${checksum}))`);
+			if (expectedChecksum) {
+				const hash = crypto.createHash('sha256');
+				hash.update(f.contents as Buffer);
+				const checksum = hash.digest('hex');
+				if (checksum !== expectedChecksum) {
+					throw new Error(`Checksum mismatch for ${vsixPath} (expected ${expectedChecksum}, actual ${checksum}))`);
+				}
 			}
 			return f;
 		}))
@@ -282,11 +296,12 @@ export function fromGithub({ name, version, repo, sha256, metadata }: IExtension
 	fancyLog('Downloading extension from GH:', ansiColors.yellow(`${name}@${version}`), '...');
 
 	const packageJsonFilter = filter('package.json', { restore: true });
+	const checksumSha256 = typeof sha256 === 'string' ? sha256 : undefined;
 
 	return fetchGithub(new URL(repo).pathname, {
 		version,
 		name: name => name.endsWith('.vsix'),
-		checksumSha256: sha256
+		checksumSha256
 	})
 		.pipe(buffer())
 		.pipe(vinylZip.src())
