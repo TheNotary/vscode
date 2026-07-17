@@ -107,6 +107,22 @@
 			}
 		},
 		{
+			"name": "ms-vscode-remote.remote-containers",
+			"version": "0.467.0",
+			"sha256": "b3bd40702da5dd7d1a99aac697da5c437f28deeec899d0bb6e78dd76a5c1b012",
+			"repo": "https://github.com/microsoft/vscode-remote-release",
+			"metadata": {
+				"id": "93ce222b-5f6f-49b7-9ab1-a0463c6238df",
+				"publisherId": {
+					"publisherId": "ac9410a2-0d75-40ec-90de-b59bb705801d",
+					"publisherName": "ms-vscode-remote",
+					"displayName": "Microsoft",
+					"flags": "verified"
+				},
+				"publisherDisplayName": "Microsoft"
+			}
+		},
+		{
 			"name": "ms-vscode-remote.remote-wsl",
 			"version": "0.104.3",
 			"sha256": "22534172b809daa91b26d34ea2764692e24760bf07a3b1156f61e56cc8a6c4af",
@@ -124,6 +140,15 @@
 		}
 	],
 	"extensionEnabledApiProposals": {
+		"ms-vscode-remote.remote-containers": [
+			"resolvers",
+			"tunnels",
+			"workspaceTrust",
+			"terminalDimensions",
+			"contribEditSessions",
+			"contribViewsRemote",
+			"contribRemoteHelp"
+		],
 		"ms-vscode-remote.remote-wsl": [
 			"resolvers",
 			"tunnels",
