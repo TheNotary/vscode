@@ -10,7 +10,7 @@
 	"serverLicenseUrl": "https://github.com/microsoft/vscode/blob/main/LICENSE.txt",
 	"serverGreeting": [],
 	"serverLicense": [],
-	"serverLicensePrompt": "",
+	"serverLicensePrompt": "UPDATE_WITH_TRUE_COMMIT_HASH",
 	"serverApplicationName": "code-server-oss",
 	"serverDataFolderName": ".vscode-server-oss",
 	"tunnelApplicationName": "code-tunnel-oss",

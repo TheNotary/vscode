@@ -75,6 +75,10 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      - name: Patch server license prompt commit
+        shell: bash
+        run: sed -i.bak 's/UPDATE_WITH_TRUE_COMMIT_HASH/${{ github.sha }}/' product.json && rm product.json.bak
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -199,6 +203,8 @@ jobs:
         # the patch. Running this script populates `.build/builtInExtensions/` and
         # patches the WSL extension in place; the subsequent gulp build then picks
         # up the patched copy from disk via the `isUpToDate` cache hit.
+        # This process can be extended to any extensions that require patching for
+        # the OSS build.
         run: npm run download-builtin-extensions
 
       - name: Compile core
