@@ -121,6 +121,38 @@
 				},
 				"publisherDisplayName": "Microsoft"
 			}
+		},
+		{
+			"name": "ms-vscode-remote.remote-containers",
+			"version": "0.467.0",
+			"sha256": "b3bd40702da5dd7d1a99aac697da5c437f28deeec899d0bb6e78dd76a5c1b012",
+			"repo": "https://github.com/microsoft/vscode-remote-release",
+			"metadata": {
+				"id": "93ce222b-5f6f-49b7-9ab1-a0463c6238df",
+				"publisherId": {
+					"publisherId": "ac9410a2-0d75-40ec-90de-b59bb705801d",
+					"publisherName": "ms-vscode-remote",
+					"displayName": "Microsoft",
+					"flags": "verified"
+				},
+				"publisherDisplayName": "Microsoft"
+			}
+		},
+		{
+			"name": "ms-vscode.remote-server",
+			"version": "1.6.2026061009",
+			"sha256": "933f83cb3fea7722c0bd94989ccafd93be617cf06460aeb5c892403cb01cb279",
+			"repo": "https://github.com/microsoft/vscode-remote-release",
+			"metadata": {
+				"id": "105c0b3c-07a9-4156-a4fc-4141040eb07e",
+				"publisherId": {
+					"publisherId": "5f5636e7-69ed-4afe-b5d6-8d231fb3d3ee",
+					"publisherName": "ms-vscode",
+					"displayName": "Microsoft",
+					"flags": "verified"
+				},
+				"publisherDisplayName": "Microsoft"
+			}
 		}
 	],
 	"extensionEnabledApiProposals": {

@@ -15,6 +15,7 @@ import fancyLog from 'fancy-log';
 import ansiColors from 'ansi-colors';
 import { Stream } from 'stream';
 import { patchBuiltInRemoteWsl } from './patchRemoteWsl.ts';
+import { patchBuiltInRemoteContainers } from './patchRemoteContainers.ts';
 
 export interface IExtensionDefinition {
 	name: string;
@@ -181,6 +182,7 @@ export function getBuiltInExtensions(): Promise<void> {
 			.on('end', () => {
 				try {
 					patchBuiltInRemoteWsl(path.join(root, '.build', 'builtInExtensions'));
+					patchBuiltInRemoteContainers(path.join(root, '.build', 'builtInExtensions'));
 					resolve();
 				} catch (err) {
 					reject(err);
