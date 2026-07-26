@@ -8,12 +8,13 @@ import { DeferredPromise, Sequencer } from '../../../../base/common/async.js';
 import { encodeBase64, VSBuffer } from '../../../../base/common/buffer.js';
 import { Emitter } from '../../../../base/common/event.js';
 import { CancellationError, getErrorMessage } from '../../../../base/common/errors.js';
+import { match as matchGlob } from '../../../../base/common/glob.js';
 import { escapeMarkdownSyntaxTokens } from '../../../../base/common/htmlContent.js';
 import { Disposable, IReference, toDisposable } from '../../../../base/common/lifecycle.js';
 import { Schemas } from '../../../../base/common/network.js';
 import { isAuthorizationProtectedResourceMetadata } from '../../../../base/common/oauth.js';
 import { safeStringify } from '../../../../base/common/objects.js';
-import { isAbsolute, join } from '../../../../base/common/path.js';
+import { basename, isAbsolute, join, relative } from '../../../../base/common/path.js';
 import { extUriBiasedIgnorePathCase, normalizePath } from '../../../../base/common/resources.js';
 import { StopWatch } from '../../../../base/common/stopwatch.js';
 import { splitLinesIncludeSeparators } from '../../../../base/common/strings.js';
@@ -30,7 +31,7 @@ import { CopilotCliConfigKey, copilotCliConfigSchema } from '../../common/copilo
 import type { ChatInputRequestWithPlanReview, IAgentHostPlanReviewAction } from '../../common/agentHostPlanReview.js';
 import { gitHubMcpServerUrl } from '../../common/githubEndpoints.js';
 import { AgentHostSandboxConfigKey, sandboxConfigSchema } from '../../common/sandboxConfigSchema.js';
-import { AgentHostGlobalAutoApproveEnabledConfigKey, AgentHostAutoReplyEnabledConfigKey, platformRootSchema, platformSessionSchema } from '../../common/agentHostSchema.js';
+import { AgentHostCopilotIgnoreConfigKey, AgentHostGlobalAutoApproveEnabledConfigKey, AgentHostAutoReplyEnabledConfigKey, platformRootSchema, platformSessionSchema } from '../../common/agentHostSchema.js';
 import { AgentSession, AgentSignal, AuthenticateParams, IMcpNotification, IRestoredSubagentSession, subagentChatTitle } from '../../common/agentService.js';
 import { stripRedundantCdPrefix } from '../../common/commandLineHelpers.js';
 import { readToolCallMeta, toToolCallMeta, type IToolCallMeta, type IToolCallUiMeta } from '../../common/meta/agentToolCallMeta.js';
@@ -54,6 +55,8 @@ import type { IUnsandboxedCommandConfirmationRequest, ShellManager } from './cop
 import { buildSandboxConfigForSdk, type ISdkSandboxConfig } from './sandboxConfigForSdk.js';
 import type { IAgentServerToolHost } from '../../common/agentServerTools.js';
 import { getEditFilePaths, getInvocationMessage, getPastTenseMessage, getPermissionDisplay, getShellIntention, getShellLanguage, getSubagentMetadata, getTaskCompleteMarkdown, getToolDisplayName, getToolInputString, getToolKind, isAgentCoordinationTool, isEditTool, isHiddenTool, isShellTool, isTaskCompleteTool, synthesizeSkillToolCall, tryStringify, type ITypedPermissionRequest } from './copilotToolDisplay.js';
+
+type ContentExclusionDenial = Extract<PermissionRequestResult, { kind: 'denied-by-content-exclusion-policy' }>;
 import { FileEditTracker } from '../shared/fileEditTracker.js';
 import { ICopilotApiService } from '../shared/copilotApiService.js';
 import { stripProxyErrorMarker, tryBuildChatErrorMeta, tryBuildChatErrorMetaFromFields } from '../shared/forwardedChatError.js';
@@ -1992,6 +1995,13 @@ export class CopilotAgentSession extends Disposable {
 		request: ITypedPermissionRequest,
 	): Promise<PermissionRequestResult> {
 		try {
+			const contentExclusionCheck = this._getContentExclusionDenial(request);
+			const contentExclusionDenial = contentExclusionCheck instanceof Promise ? await contentExclusionCheck : contentExclusionCheck;
+			if (contentExclusionDenial) {
+				this._logService.info(`[Copilot:${this.sessionId}] Denying ${request.kind} request for Copilot-ignored file ${contentExclusionDenial.path}`);
+				return contentExclusionDenial;
+			}
+
 			const toolCallId = request.toolCallId;
 			if (!toolCallId) {
 				// TODO: handle permission requests without a toolCallId by creating a synthetic tool call
@@ -2187,6 +2197,54 @@ export class CopilotAgentSession extends Disposable {
 			this._logService.error(error, `[Copilot:${this.sessionId}] Failed to handle permission request: kind=${request.kind}, toolCallId=${request.toolCallId ?? 'missing'}`);
 			throw error;
 		}
+	}
+
+	private _getContentExclusionDenial(request: ITypedPermissionRequest): ContentExclusionDenial | Promise<ContentExclusionDenial | undefined> | undefined {
+		const patterns = this._configurationService.getRootValue(platformRootSchema, AgentHostCopilotIgnoreConfigKey) ?? [];
+		const candidates = request.kind === 'read'
+			? (typeof request.path === 'string' ? [request.path] : [])
+			: request.kind === 'write'
+				? (typeof request.fileName === 'string' ? [request.fileName] : [])
+				: request.kind === 'shell' ? request.possiblePaths ?? [] : [];
+		if (request.kind === 'shell' && candidates.length > 0) {
+			return this._getShellContentExclusionDenial(candidates, patterns);
+		}
+
+		for (const candidate of candidates) {
+			const path = this._resolveEditFilePath(candidate);
+			if (this._matchesCopilotIgnore(path, patterns)) {
+				return this._createContentExclusionDenial(path);
+			}
+		}
+		return undefined;
+	}
+
+	private async _getShellContentExclusionDenial(candidates: readonly string[], patterns: readonly string[]): Promise<ContentExclusionDenial | undefined> {
+		for (const candidate of candidates) {
+			const path = this._resolveEditFilePath(candidate);
+			if (await this._fileService.exists(URI.file(path)) && this._matchesCopilotIgnore(path, patterns)) {
+				return this._createContentExclusionDenial(path);
+			}
+		}
+		return undefined;
+	}
+
+	private _createContentExclusionDenial(path: string): ContentExclusionDenial {
+		return {
+			kind: 'denied-by-content-exclusion-policy',
+			path,
+			message: localize('agentHost.copilotIgnore.denied', "Access to this file is blocked by Copilot content exclusion settings."),
+		};
+	}
+
+	private _matchesCopilotIgnore(path: string, patterns: readonly string[]): boolean {
+		const normalizedPath = path.replaceAll('\\', '/');
+		const relativePath = this._workingDirectory?.scheme === Schemas.file
+			? relative(this._workingDirectory.fsPath, path).replaceAll('\\', '/')
+			: undefined;
+		return patterns.some(pattern => matchGlob(pattern, basename(path))
+			|| matchGlob(pattern, normalizedPath)
+			|| (relativePath !== undefined && matchGlob(pattern, relativePath)));
 	}
 
 	private _getInternalSessionResourcePath(request: ITypedPermissionRequest): string | undefined {

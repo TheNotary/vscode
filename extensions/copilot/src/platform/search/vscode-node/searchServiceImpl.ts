@@ -5,7 +5,7 @@
 
 import type * as vscode from 'vscode';
 import { combineGlob } from '../../../util/common/glob';
-import { filterIngoredResources, IIgnoreService } from '../../ignore/common/ignoreService';
+import { filterIgnoredTextSearchResults, filterIngoredResources, IIgnoreService } from '../../ignore/common/ignoreService';
 import { LogExecTime } from '../../log/common/logExecTime';
 import { ILogService } from '../../log/common/logService';
 import { BaseSearchServiceImpl } from '../vscode/baseSearchServiceImpl';
@@ -65,5 +65,13 @@ export class SearchServiceImpl extends BaseSearchServiceImpl {
 		const result = await super.findTextInFiles(query, options, ignoreSupportedProgress, token);
 		await Promise.all(jobs);
 		return result;
+	}
+
+	override findTextInFiles2(query: vscode.TextSearchQuery2, options?: vscode.FindTextInFilesOptions2, token?: vscode.CancellationToken): vscode.FindTextInFilesResponse {
+		const response = super.findTextInFiles2(query, options, token);
+		return {
+			complete: response.complete,
+			results: filterIgnoredTextSearchResults(this._ignoreService, response.results, token)
+		};
 	}
 }

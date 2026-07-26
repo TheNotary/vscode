@@ -5,6 +5,10 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CancellationToken, ChatParticipantToolToken } from 'vscode';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { IIgnoreService, NullIgnoreService } from '../../../../../platform/ignore/common/ignoreService';
 import { ILogService } from '../../../../../platform/log/common/logService';
 import { IWorkspaceService } from '../../../../../platform/workspace/common/workspaceService';
 import { CancellationTokenSource } from '../../../../../util/vs/base/common/cancellation';
@@ -18,7 +22,7 @@ import { IToolsService } from '../../../../tools/common/toolsService';
 import { ExternalEditTracker } from '../../../common/externalEditTracker';
 import { IWorkspaceInfo } from '../../../common/workspaceInfo';
 import { ICopilotCLIImageSupport } from '../copilotCLIImageSupport';
-import { buildMcpConfirmationParams, buildShellConfirmationParams, handleReadPermission, handleWritePermission, isFileFromSessionWorkspace, PermissionRequest, requiresFileEditconfirmation, showInteractivePermissionPrompt } from '../permissionHelpers';
+import { buildMcpConfirmationParams, buildShellConfirmationParams, getContentExclusionDenial, handleReadPermission, handleWritePermission, isFileFromSessionWorkspace, PermissionRequest, requiresFileEditconfirmation, showInteractivePermissionPrompt } from '../permissionHelpers';
 
 
 describe('CopilotCLI permissionHelpers', () => {
@@ -216,6 +220,66 @@ describe('CopilotCLI permissionHelpers', () => {
 			const workingDirectory = URI.file('/workspace');
 			// workingDirectory callback always returns the same folder, treating all files as in-workspace
 			expect(await requiresFileEditconfirmation(instaService, req, undefined, workingDirectory)).toBe(false);
+		});
+	});
+
+	describe('getContentExclusionDenial', () => {
+		const ignoredPath = URI.file('/workspace/ignored.secret');
+		const ignoreService: IIgnoreService = new class extends NullIgnoreService {
+			override async isCopilotIgnored(file: URI): Promise<boolean> {
+				return file.fsPath === ignoredPath.fsPath;
+			}
+		}();
+
+		it('denies ignored read and write requests', async () => {
+			const read = await getContentExclusionDenial(ignoreService, { kind: 'read', path: ignoredPath.fsPath } as PermissionRequest);
+			const write = await getContentExclusionDenial(ignoreService, { kind: 'write', fileName: ignoredPath.fsPath } as PermissionRequest);
+
+			expect([read, write]).toEqual([
+				{
+					kind: 'denied-by-content-exclusion-policy',
+					path: ignoredPath.fsPath,
+					message: 'Access to this file is blocked by Copilot content exclusion settings.',
+				},
+				{
+					kind: 'denied-by-content-exclusion-policy',
+					path: ignoredPath.fsPath,
+					message: 'Access to this file is blocked by Copilot content exclusion settings.',
+				},
+			]);
+		});
+
+		it('does not deny non-file or non-ignored requests', async () => {
+			expect([
+				await getContentExclusionDenial(ignoreService, { kind: 'shell', fullCommandText: 'echo ok' } as PermissionRequest),
+				await getContentExclusionDenial(ignoreService, { kind: 'read', path: '/workspace/visible.ts' } as PermissionRequest),
+			]).toEqual([undefined, undefined]);
+		});
+
+		it('denies existing shell paths and ignores phantom candidates', async () => {
+			const workingDirectory = await mkdtemp(join(tmpdir(), 'copilot-ignore-'));
+			try {
+				const shellIgnoredPath = join(workingDirectory, 'shell.secret');
+				await writeFile(shellIgnoredPath, 'secret');
+				const shellIgnoreService = new class extends NullIgnoreService {
+					override async isCopilotIgnored(file: URI): Promise<boolean> {
+						return file.fsPath.endsWith('.secret');
+					}
+				}();
+				const shellRequest = {
+					kind: 'shell',
+					fullCommandText: 'cat shell.secret phantom.secret',
+					possiblePaths: ['phantom.secret', 'shell.secret'],
+				} as PermissionRequest;
+
+				expect(await getContentExclusionDenial(shellIgnoreService, shellRequest, undefined, undefined, URI.file(workingDirectory))).toEqual({
+					kind: 'denied-by-content-exclusion-policy',
+					path: URI.file(shellIgnoredPath).fsPath,
+					message: 'Access to this file is blocked by Copilot content exclusion settings.',
+				});
+			} finally {
+				await rm(workingDirectory, { recursive: true, force: true });
+			}
 		});
 	});
 

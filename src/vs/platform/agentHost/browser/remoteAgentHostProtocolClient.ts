@@ -37,7 +37,7 @@ import { encodeBase64 } from '../../../base/common/buffer.js';
 import { ILoadEstimator, LoadEstimator } from '../../../base/parts/ipc/common/ipc.net.js';
 import { TELEMETRY_CRASH_REPORTER_SETTING_ID, TELEMETRY_OLD_SETTING_ID, TELEMETRY_SETTING_ID } from '../../telemetry/common/telemetry.js';
 import { getTelemetryLevel } from '../../telemetry/common/telemetryUtils.js';
-import { AgentHostTelemetryLevelConfigKey, AgentHostCodexEnabledConfigKey, AgentHostSessionSyncEnabledConfigKey, AgentHostTerminalAutoApproveEnabledConfigKey, AgentHostGlobalAutoApproveEnabledConfigKey, AgentHostAutoReplyEnabledConfigKey, AgentHostPreferLongContextEnabledConfigKey, AgentHostSystemProxyEnabledConfigKey, AgentHostTerminalAutoApproveRulesConfigKey, getAgentHostTerminalAutoApproveRulesConfig, SESSION_SYNC_ENABLED_SETTING_ID, TERMINAL_AUTO_APPROVE_ENABLED_SETTING_ID, GLOBAL_AUTO_APPROVE_SETTING_ID, AUTO_REPLY_SETTING_ID, PREFER_LONG_CONTEXT_SETTING_ID, TERMINAL_AUTO_APPROVE_SETTING_ID, TERMINAL_IGNORE_DEFAULT_AUTO_APPROVE_RULES_SETTING_ID, telemetryLevelToAgentHostConfigValue } from '../common/agentHostSchema.js';
+import { AgentHostTelemetryLevelConfigKey, AgentHostCodexEnabledConfigKey, AgentHostSessionSyncEnabledConfigKey, AgentHostTerminalAutoApproveEnabledConfigKey, AgentHostGlobalAutoApproveEnabledConfigKey, AgentHostAutoReplyEnabledConfigKey, AgentHostPreferLongContextEnabledConfigKey, AgentHostSystemProxyEnabledConfigKey, AgentHostCopilotIgnoreConfigKey, AgentHostTerminalAutoApproveRulesConfigKey, getAgentHostTerminalAutoApproveRulesConfig, SESSION_SYNC_ENABLED_SETTING_ID, TERMINAL_AUTO_APPROVE_ENABLED_SETTING_ID, GLOBAL_AUTO_APPROVE_SETTING_ID, AUTO_REPLY_SETTING_ID, PREFER_LONG_CONTEXT_SETTING_ID, COPILOT_IGNORE_SETTING_ID, TERMINAL_AUTO_APPROVE_SETTING_ID, TERMINAL_IGNORE_DEFAULT_AUTO_APPROVE_RULES_SETTING_ID, telemetryLevelToAgentHostConfigValue } from '../common/agentHostSchema.js';
 import type { OtlpExportLogsParams } from '../common/state/protocol/channels-otlp/notifications.js';
 import type { TelemetryCapabilities } from '../common/state/protocol/channels-otlp/state.js';
 import type { InitializeResult } from '../common/state/protocol/common/commands.js';
@@ -370,6 +370,12 @@ export class RemoteAgentHostProtocolClient extends Disposable implements IAgentC
 				}
 				this._updateSystemProxyEnabled();
 			}
+			if (e.affectsConfiguration(COPILOT_IGNORE_SETTING_ID)) {
+				if (this._state.kind !== AgentHostClientState.Connected) {
+					return;
+				}
+				this._updateCopilotIgnore();
+			}
 			if (e.affectsConfiguration(TERMINAL_AUTO_APPROVE_SETTING_ID) || e.affectsConfiguration(TERMINAL_IGNORE_DEFAULT_AUTO_APPROVE_RULES_SETTING_ID)) {
 				if (this._state.kind !== AgentHostClientState.Connected) {
 					return;
@@ -475,6 +481,7 @@ export class RemoteAgentHostProtocolClient extends Disposable implements IAgentC
 		this._updateAutoReplyEnabled();
 		this._updatePreferLongContextEnabled();
 		this._updateSystemProxyEnabled();
+		this._updateCopilotIgnore();
 		this._updateTerminalAutoApproveRules();
 		this._updateCodexEnabled();
 		this._transitionTo({ kind: AgentHostClientState.Connected });
@@ -1396,6 +1403,14 @@ export class RemoteAgentHostProtocolClient extends Disposable implements IAgentC
 		this.dispatchAction(ROOT_STATE_URI, {
 			type: ActionType.RootConfigChanged,
 			config: { [AgentHostSystemProxyEnabledConfigKey]: enabled },
+		}, this._clientId, 0);
+	}
+
+	private _updateCopilotIgnore(): void {
+		const patterns = this._configurationService.getValue<string[]>(COPILOT_IGNORE_SETTING_ID) ?? [];
+		this.dispatchAction(ROOT_STATE_URI, {
+			type: ActionType.RootConfigChanged,
+			config: { [AgentHostCopilotIgnoreConfigKey]: patterns },
 		}, this._clientId, 0);
 	}
 

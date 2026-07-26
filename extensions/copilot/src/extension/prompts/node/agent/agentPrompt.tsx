@@ -724,6 +724,7 @@ class CurrentEditorContext extends PromptElement<CurrentEditorContextProps> {
 		@IPromptPathRepresentationService private readonly promptPathRepresentationService: IPromptPathRepresentationService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IAlternativeNotebookContentService private readonly alternativeNotebookContent: IAlternativeNotebookContentService,
+		@IIgnoreService private readonly ignoreService: IIgnoreService,
 	) {
 		super(props);
 	}
@@ -735,12 +736,12 @@ class CurrentEditorContext extends PromptElement<CurrentEditorContextProps> {
 
 		let context: PromptElement | undefined;
 		const activeEditor = this.tabsAndEditorsService.activeTextEditor;
-		if (activeEditor) {
+		if (activeEditor && !await this.ignoreService.isCopilotIgnored(URI.revive(activeEditor.document.uri))) {
 			context = this.renderActiveTextEditor(activeEditor);
 		}
 
 		const activeNotebookEditor = this.tabsAndEditorsService.activeNotebookEditor;
-		if (activeNotebookEditor) {
+		if (activeNotebookEditor && !await this.ignoreService.isCopilotIgnored(URI.revive(activeNotebookEditor.notebook.uri))) {
 			context = this.renderActiveNotebookEditor(activeNotebookEditor);
 		}
 
