@@ -47,6 +47,7 @@ export enum ChatConfiguration {
 	InlineReferencesStyle = 'chat.inlineReferences.style',
 	AutoReply = 'chat.autoReply',
 	GlobalAutoApprove = 'chat.tools.global.autoApprove',
+	CopilotIgnore = 'chat.copilotIgnore',
 	AutoApproveEdits = 'chat.tools.edits.autoApprove',
 	AutoApprovedUrls = 'chat.tools.urls.autoApprove',
 	EligibleForAutoApproval = 'chat.tools.eligibleForAutoApproval',

@@ -35,7 +35,7 @@ import { CopilotSessionWrapper } from '../../node/copilot/copilotSessionWrapper.
 import { buildCopilotSystemNotification } from '../../node/copilot/copilotSystemNotification.js';
 import { IAgentConfigurationService } from '../../node/agentConfigurationService.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
-import { AgentHostAutoReplyEnabledConfigKey, AgentHostGlobalAutoApproveEnabledConfigKey } from '../../common/agentHostSchema.js';
+import { AgentHostAutoReplyEnabledConfigKey, AgentHostCopilotIgnoreConfigKey, AgentHostGlobalAutoApproveEnabledConfigKey } from '../../common/agentHostSchema.js';
 import { CopilotCliConfigKey } from '../../common/copilotCliConfig.js';
 import { AgentHostSandboxConfigKey, AgentHostSandboxKey } from '../../common/sandboxConfigSchema.js';
 import { AgentSandboxEnabledValue } from '../../../sandbox/common/settings.js';
@@ -1844,6 +1844,57 @@ suite('CopilotAgentSession', () => {
 
 			assert.strictEqual(result.kind, 'approve-once');
 			assert.strictEqual(signals.length, 0);
+		});
+
+		test('denies Copilot-ignored read and write requests', async () => {
+			const workingDirectory = URI.file('/workspace');
+			const { runtime, signals } = await createAgentSession(disposables, {
+				workingDirectory,
+				rootValues: { [AgentHostCopilotIgnoreConfigKey]: ['*.secret', '**/credentials/**'] },
+			});
+
+			const readResult = await runtime.handlePermissionRequest({
+				kind: 'read',
+				toolCallId: 'tc-ignored-read',
+				path: 'private.secret',
+			});
+			const writeResult = await runtime.handlePermissionRequest({
+				kind: 'write',
+				toolCallId: 'tc-ignored-write',
+				fileName: 'credentials/new-token.txt',
+			});
+
+			assert.deepStrictEqual([readResult.kind, writeResult.kind, signals.length], [
+				'denied-by-content-exclusion-policy',
+				'denied-by-content-exclusion-policy',
+				0,
+			]);
+		});
+
+		test('denies Copilot-ignored shell paths before sandbox auto-approval', async () => {
+			const workingDirectory = URI.file('/workspace');
+			const ignoredPath = join(workingDirectory.fsPath, 'credentials', 'token.txt');
+			const { runtime, signals } = await createAgentSession(disposables, {
+				workingDirectory,
+				rootValues: {
+					[AgentHostCopilotIgnoreConfigKey]: ['**/credentials/**'],
+					[AgentHostSandboxConfigKey.Sandbox]: { [AgentHostSandboxKey.Enabled]: AgentSandboxEnabledValue.On },
+				},
+				fileContents: { [ignoredPath]: 'secret' },
+			});
+
+			const result = await runtime.handlePermissionRequest({
+				kind: 'shell',
+				toolCallId: 'tc-ignored-shell',
+				fullCommandText: 'cat credentials/token.txt',
+				possiblePaths: ['phantom-command', 'credentials/token.txt'],
+			});
+
+			assert.deepStrictEqual([result.kind, result.kind === 'denied-by-content-exclusion-policy' ? result.path : undefined, signals.length], [
+				'denied-by-content-exclusion-policy',
+				ignoredPath,
+				0,
+			]);
 		});
 
 		test('does not auto-approve a shell command that opted out of the sandbox', async () => {

@@ -479,6 +479,16 @@ configurationRegistry.registerConfiguration({
 			scope: ConfigurationScope.APPLICATION_MACHINE,
 			tags: ['experimental', 'advanced'],
 		},
+		[ChatConfiguration.CopilotIgnore]: {
+			type: 'array',
+			items: {
+				type: 'string',
+			},
+			default: [],
+			scope: ConfigurationScope.APPLICATION,
+			ignoreSync: true,
+			markdownDescription: nls.localize('chat.copilotIgnore', "Glob patterns for files that Copilot must not access in local and remote windows. Patterns are matched against file names, workspace-relative paths, and absolute paths. These exclusions apply in addition to `.copilotignore` and organization content exclusion rules."),
+		},
 		[ChatConfiguration.AutopilotAdvancedEnabled]: {
 			type: 'boolean',
 			markdownDescription: nls.localize('chat.autopilot.advanced.enabled', "Enables **Advanced Autopilot**, a single switch that turns on all advanced Autopilot behaviors that delegate more of the loop to the agent. Currently, after each Autopilot turn a small, fast model evaluates whether your original request is complete; if not, Autopilot keeps working using that evaluation as guidance for the next turn, instead of relying on the agent to signal completion itself."),

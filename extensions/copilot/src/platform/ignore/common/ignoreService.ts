@@ -4,9 +4,12 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as l10n from '@vscode/l10n';
+import type * as vscode from 'vscode';
 import { createServiceIdentifier } from '../../../util/common/services';
 import { CancellationToken } from '../../../util/vs/base/common/cancellation';
 import { URI } from '../../../util/vs/base/common/uri';
+
+export const COPILOT_IGNORE_CONFIG_KEY = 'chat.copilotIgnore';
 
 export const HAS_IGNORED_FILES_MESSAGE = l10n.t('\n\n**Note:** Some files were excluded from the context due to content exclusion rules. Click [here](https://docs.github.com/en/copilot/managing-github-copilot-in-your-organization/configuring-content-exclusions-for-github-copilot) to learn more.');
 
@@ -69,4 +72,12 @@ export async function filterIngoredResources(ignoreService: IIgnoreService, reso
 		}
 	}
 	return result;
+}
+
+export async function* filterIgnoredTextSearchResults(ignoreService: IIgnoreService, results: AsyncIterable<vscode.TextSearchResult2>, token?: CancellationToken): AsyncIterable<vscode.TextSearchResult2> {
+	for await (const result of results) {
+		if (!await ignoreService.isCopilotIgnored(result.uri, token)) {
+			yield result;
+		}
+	}
 }

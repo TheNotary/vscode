@@ -449,6 +449,12 @@ export const AgentHostPreferLongContextEnabledConfigKey = 'preferLongContextEnab
 // The Copilot Chat setting ID for preferring long context, forwarded into the agent host root config.
 export const PREFER_LONG_CONTEXT_SETTING_ID = 'github.copilot.chat.preferLongContext.enabled';
 
+/** Root config key carrying local Copilot content-exclusion glob patterns. */
+export const AgentHostCopilotIgnoreConfigKey = 'copilotIgnore';
+
+/** The VS Code setting ID for local Copilot content exclusions. */
+export const COPILOT_IGNORE_SETTING_ID = 'chat.copilotIgnore';
+
 /**
  * Root config key forwarded from the renderer when VS Code's
  * `chat.tools.terminal.autoApprove` setting changes. Holds the effective
@@ -692,6 +698,13 @@ export const platformRootSchema = createSchema({
 		title: localize('agentHost.config.preferLongContextEnabled.title', "Prefer Long Context"),
 		description: localize('agentHost.config.preferLongContextEnabled.description', "Whether Copilot Chat's prefer-long-context setting is enabled. When `true`, models with a free long context window only show the long context option in the picker. When `false` (default), the smaller default context option stays selectable."),
 		default: false,
+	}),
+	[AgentHostCopilotIgnoreConfigKey]: schemaProperty<string[]>({
+		type: 'array',
+		title: localize('agentHost.config.copilotIgnore.title', "Copilot Ignore"),
+		description: localize('agentHost.config.copilotIgnore.description', "Local file glob patterns that Copilot must not access."),
+		items: { type: 'string', title: localize('agentHost.config.copilotIgnore.item.title', "Pattern") },
+		default: [],
 	}),
 	[AgentHostTerminalAutoApproveRulesConfigKey]: schemaProperty<AgentHostTerminalAutoApproveRules>({
 		type: 'object',

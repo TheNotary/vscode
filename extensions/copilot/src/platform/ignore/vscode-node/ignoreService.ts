@@ -5,6 +5,7 @@
 
 import { workspace } from 'vscode';
 import { IAuthenticationService } from '../../authentication/common/authentication';
+import { IConfigurationService } from '../../configuration/common/configurationService';
 import { ICAPIClientService } from '../../endpoint/common/capiClient';
 import { VSCodeFileSystemService } from '../../filesystem/vscode/fileSystemServiceImpl';
 import { IGitExtensionService } from '../../git/common/gitExtensionService';
@@ -25,7 +26,8 @@ export class VsCodeIgnoreService extends BaseIgnoreService {
 		@IAuthenticationService _authService: IAuthenticationService,
 		@IWorkspaceService _workspaceService: IWorkspaceService,
 		@ICAPIClientService _capiClientService: ICAPIClientService,
-		@IRequestLogger _requestLogger: IRequestLogger
+		@IRequestLogger _requestLogger: IRequestLogger,
+		@IConfigurationService _configurationService: IConfigurationService,
 	) {
 		super(
 			_gitService,
@@ -35,7 +37,8 @@ export class VsCodeIgnoreService extends BaseIgnoreService {
 			_capiClientService,
 			new BaseSearchServiceImpl(),
 			new VSCodeFileSystemService(),
-			_requestLogger
+			_requestLogger,
+			_configurationService
 		);
 		this.installListeners();
 	}

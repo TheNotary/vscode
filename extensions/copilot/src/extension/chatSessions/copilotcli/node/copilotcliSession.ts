@@ -15,6 +15,7 @@ import { getQuotaMessageForPlan } from '../../../../platform/chat/common/commonT
 import { ConfigKey, IConfigurationService } from '../../../../platform/configuration/common/configurationService';
 import { IGitService } from '../../../../platform/git/common/gitService';
 import { PermissiveAuthRequiredError } from '../../../../platform/github/common/githubService';
+import { IIgnoreService } from '../../../../platform/ignore/common/ignoreService';
 import { ILogService } from '../../../../platform/log/common/logService';
 import { GenAiMetrics } from '../../../../platform/otel/common/genAiMetrics';
 import { CopilotChatAttr, GenAiAttr, GenAiOperationName, GenAiProviderName, IOTelService, ISpanHandle, resolveWorkspaceOTelMetadata, SpanKind, SpanStatusCode, TraceContext, truncateForOTel, workspaceMetadataToOTelAttributes } from '../../../../platform/otel/common/index';
@@ -45,7 +46,7 @@ import type { CopilotCliBridgeSpanProcessor } from './copilotCliBridgeSpanProces
 import { ICopilotCLIImageSupport } from './copilotCLIImageSupport';
 import { handleExitPlanMode } from './exitPlanModeHandler';
 import { type McCommand, type McEvent, type McSessionCreateResult, MissionControlApiClient } from './missionControlApiClient';
-import { handleMcpPermission, handleReadPermission, handleShellPermission, handleWritePermission, type PermissionRequest, type PermissionRequestResult, showInteractivePermissionPrompt } from './permissionHelpers';
+import { getContentExclusionDenial, handleMcpPermission, handleReadPermission, handleShellPermission, handleWritePermission, type PermissionRequest, type PermissionRequestResult, showInteractivePermissionPrompt } from './permissionHelpers';
 import { TodoSqlQuery } from './todoSqlQuery';
 import { IQuestion, IQuestionAnswer, IUserQuestionHandler } from './userInputHelpers';
 
@@ -926,6 +927,7 @@ export class CopilotCLISession extends DisposableStore implements ICopilotCLISes
 		@IAuthenticationService private readonly _authenticationService: IAuthenticationService,
 		@IChatQuotaService private readonly _chatQuotaService: IChatQuotaService,
 		@ITelemetryService private readonly _telemetryService: ITelemetryService,
+		@IIgnoreService private readonly _ignoreService: IIgnoreService,
 	) {
 		super();
 		this.sessionId = _sdkSession.sessionId;
@@ -1304,6 +1306,13 @@ export class CopilotCLISession extends DisposableStore implements ICopilotCLISes
 				const requestId = event.data.requestId;
 
 				const isSandboxBypassShell = permissionRequest.kind === 'shell' && permissionRequest.requestSandboxBypass === true;
+				const toolData = permissionRequest.toolCallId ? toolCalls.get(permissionRequest.toolCallId) : undefined;
+				const contentExclusionDenial = await getContentExclusionDenial(this._ignoreService, permissionRequest, toolData, token, getWorkingDirectory(this.workspace));
+				if (contentExclusionDenial) {
+					this.logService.trace(`[CopilotCLISession] Denying ${permissionRequest.kind} request for Copilot-ignored file ${contentExclusionDenial.path}`);
+					this._sdkSession.respondToPermission(requestId, contentExclusionDenial);
+					return;
+				}
 
 				// Auto-approve all requests when the permission level allows it.
 				if (!isSandboxBypassShell && (effectivePermissionLevel === 'autoApprove' || effectivePermissionLevel === 'autopilot')) {
@@ -1319,7 +1328,6 @@ export class CopilotCLISession extends DisposableStore implements ICopilotCLISes
 				}
 
 				// Resolve tool call data for the permission request.
-				const toolData = permissionRequest.toolCallId ? toolCalls.get(permissionRequest.toolCallId) : undefined;
 				const pendingData = permissionRequest.toolCallId ? pendingToolInvocations.get(permissionRequest.toolCallId) : undefined;
 				const toolParentCallId = pendingData ? pendingData[2] : undefined;
 				const toolInvocationToken = this._toolInvocationToken as unknown as never;
