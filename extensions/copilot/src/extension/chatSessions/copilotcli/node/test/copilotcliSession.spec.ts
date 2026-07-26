@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatParticipantToolToken, ChatResponseStream } from 'vscode';
 import { ConfigKey, IConfigurationService } from '../../../../../platform/configuration/common/configurationService';
 import { QuotaSnapshots } from '../../../../../platform/chat/common/chatQuotaService';
+import { IIgnoreService, NullIgnoreService } from '../../../../../platform/ignore/common/ignoreService';
 import { MockGitService } from '../../../../../platform/ignore/node/test/mockGitService';
 import { ILogService } from '../../../../../platform/log/common/logService';
 import { GenAiAttr, IOTelService, NoopOTelService, resolveOTelConfig, SpanKind } from '../../../../../platform/otel/common/index';
@@ -232,6 +233,7 @@ describe('CopilotCLISession', () => {
 	let authInfo: NonNullable<SessionOptions['authInfo']>;
 	let userQuestionAnswer: IQuestionAnswer | undefined;
 	let telemetryService: ITelemetryService;
+	let ignoreService: IIgnoreService;
 	let processedQuotaSnapshots: QuotaSnapshots[];
 	beforeEach(async () => {
 		const services = disposables.add(createExtensionUnitTestingServices());
@@ -254,6 +256,7 @@ describe('CopilotCLISession', () => {
 		toolsService = new FakeToolsService();
 		userQuestionAnswer = undefined;
 		telemetryService = new NullTelemetryService();
+		ignoreService = NullIgnoreService.Instance;
 		processedQuotaSnapshots = [];
 	});
 
@@ -296,9 +299,38 @@ describe('CopilotCLISession', () => {
 			new MockGitService(),
 			{ _serviceBrand: undefined } as any,
 			{ _serviceBrand: undefined, resetTurnCredits() { }, getCreditsForTurn() { return undefined; }, setLastCopilotUsage() { }, processQuotaSnapshots(snapshots: QuotaSnapshots) { processedQuotaSnapshots.push(snapshots); } } as any,
-			telemetryService
+			telemetryService,
+			ignoreService
 		));
 	}
+
+	it('denies Copilot-ignored file access before permission-level auto-approval', async () => {
+		const ignoredPath = URI.file('/workspace/ignored.secret');
+		ignoreService = new class extends NullIgnoreService {
+			override async isCopilotIgnored(file: URI): Promise<boolean> {
+				return file.fsPath === ignoredPath.fsPath;
+			}
+		}();
+
+		for (const permissionLevel of [undefined, 'autoApprove', 'autopilot']) {
+			sdkSession = new MockSdkSession();
+			let result: unknown;
+			sdkSession.send = async () => {
+				result = await sdkSession.emitPermissionRequest({ kind: 'read', path: ignoredPath.fsPath, intention: 'Read file' });
+			};
+			const session = await createSession();
+			session.setPermissionLevel(permissionLevel);
+			session.attachStream(new MockChatResponseStream());
+
+			await session.handleRequest({ id: '', toolInvocationToken: undefined as never }, { prompt: 'Read ignored file' }, [], undefined, authInfo, CancellationToken.None);
+
+			expect(result, permissionLevel).toEqual({
+				kind: 'denied-by-content-exclusion-policy',
+				path: ignoredPath.fsPath,
+				message: 'Access to this file is blocked by Copilot content exclusion settings.',
+			});
+		}
+	});
 
 	it('handles a successful request and streams assistant output', async () => {
 		const session = await createSession();

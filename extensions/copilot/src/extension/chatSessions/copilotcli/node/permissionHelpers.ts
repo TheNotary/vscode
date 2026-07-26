@@ -4,8 +4,12 @@
  *--------------------------------------------------------------------------------------------*/
 
 import type { Attachment, PermissionRequestedEvent } from '@github/copilot/sdk';
+import * as l10n from '@vscode/l10n';
+import { stat } from 'node:fs/promises';
 import { platform } from 'node:os';
+import { isAbsolute } from 'node:path';
 import type { CancellationToken, ChatParticipantToolToken, ChatResponseStream } from 'vscode';
+import { IIgnoreService } from '../../../../platform/ignore/common/ignoreService';
 import { ILogService } from '../../../../platform/log/common/logService';
 import { IWorkspaceService } from '../../../../platform/workspace/common/workspaceService';
 import { extUriBiasedIgnorePathCase, isEqual } from '../../../../util/vs/base/common/resources';
@@ -434,6 +438,36 @@ export function getFileBeingEdited(permissionRequest: Extract<PermissionRequest,
 	// Sometimes we don't get a tool call id for the edit permission request
 	const editFile = editFiles && editFiles.length ? editFiles[0] : (permissionRequest.fileName ? URI.file(permissionRequest.fileName) : undefined);
 	return editFile;
+}
+
+export async function getContentExclusionDenial(ignoreService: IIgnoreService, permissionRequest: PermissionRequest, toolCall?: ToolCall, token?: CancellationToken, workingDirectory?: URI): Promise<PermissionRequestResult | undefined> {
+	let files: URI[];
+	if (permissionRequest.kind === 'read') {
+		files = [URI.file(permissionRequest.path)];
+	} else if (permissionRequest.kind === 'write') {
+		const editFile = getFileBeingEdited(permissionRequest, toolCall);
+		files = editFile ? [editFile] : [];
+	} else if (permissionRequest.kind === 'shell') {
+		files = (await Promise.all((permissionRequest.possiblePaths ?? []).map(async path => {
+			const file = isAbsolute(path) ? URI.file(path) : workingDirectory ? URI.joinPath(workingDirectory, path) : undefined;
+			if (!file || !await stat(file.fsPath).then(() => true, () => false)) {
+				return undefined;
+			}
+			return file;
+		}))).filter(file => file !== undefined);
+	} else {
+		files = [];
+	}
+	for (const file of files) {
+		if (await ignoreService.isCopilotIgnored(file, token)) {
+			return {
+				kind: 'denied-by-content-exclusion-policy',
+				path: file.fsPath,
+				message: l10n.t('Access to this file is blocked by Copilot content exclusion settings.'),
+			};
+		}
+	}
+	return undefined;
 }
 function codeBlock(obj: unknown): string {
 	return `\n\n\`\`\`\n${JSON.stringify(obj, null, 2)}\n\`\`\``;

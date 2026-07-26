@@ -1059,6 +1059,8 @@ export interface ITypedPermissionRequest {
 	fileName?: string;
 	/** Full shell command text — set for `shell` permission requests. */
 	fullCommandText?: string;
+	/** Paths that a shell command may read or write. */
+	possiblePaths?: string[];
 	/**
 	 * True when the model requested this `shell` command run outside the
 	 * sandbox (via `requestSandboxBypass`) and the host opted in via

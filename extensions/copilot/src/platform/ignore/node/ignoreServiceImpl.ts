@@ -3,12 +3,15 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { minimatch } from 'minimatch';
 import { CancellationToken } from '../../../util/vs/base/common/cancellation';
 import { Emitter } from '../../../util/vs/base/common/event';
 import { IDisposable } from '../../../util/vs/base/common/lifecycle';
+import { relative } from '../../../util/vs/base/common/path';
 import { URI } from '../../../util/vs/base/common/uri';
 import { ExcludeSettingOptions } from '../../../vscodeTypes';
 import { IAuthenticationService } from '../../authentication/common/authentication';
+import { IConfigurationService } from '../../configuration/common/configurationService';
 import { ICAPIClientService } from '../../endpoint/common/capiClient';
 import { IFileSystemService } from '../../filesystem/common/fileSystemService';
 import { RelativePattern } from '../../filesystem/common/fileTypes';
@@ -17,7 +20,7 @@ import { ILogService } from '../../log/common/logService';
 import { IRequestLogger } from '../../requestLogger/common/requestLogger';
 import { ISearchService } from '../../search/common/searchService';
 import { IWorkspaceService } from '../../workspace/common/workspaceService';
-import { IIgnoreService } from '../common/ignoreService';
+import { COPILOT_IGNORE_CONFIG_KEY, IIgnoreService } from '../common/ignoreService';
 import { IgnoreFile } from './ignoreFile';
 import { RemoteContentExclusion } from './remoteContentExclusion';
 
@@ -30,6 +33,7 @@ export class BaseIgnoreService implements IIgnoreService {
 	private readonly _copilotIgnoreFiles = new IgnoreFile();
 	private _remoteContentExclusions: RemoteContentExclusion | undefined;
 	private _copilotIgnoreEnabled = false;
+	private _localFileExclusions: readonly string[];
 	private readonly _onDidChangeCopilotIgnoreEnablement = new Emitter<boolean>();
 
 	protected _disposables: IDisposable[] = [];
@@ -45,8 +49,15 @@ export class BaseIgnoreService implements IIgnoreService {
 		private readonly searchService: ISearchService,
 		private readonly fs: IFileSystemService,
 		private readonly _requestLogger: IRequestLogger,
+		private readonly _configurationService: IConfigurationService,
 	) {
+		this._localFileExclusions = this.readLocalFileExclusions();
 		this._disposables.push(this._onDidChangeCopilotIgnoreEnablement);
+		this._disposables.push(this._configurationService.onDidChangeConfiguration(e => {
+			if (e.affectsConfiguration(COPILOT_IGNORE_CONFIG_KEY)) {
+				this._localFileExclusions = this.readLocalFileExclusions();
+			}
+		}));
 		this._disposables.push(this._authService.onDidCopilotTokenChange(() => {
 			const copilotIgnoreEnabled = this._authService.copilotToken?.isCopilotIgnoreEnabled() ?? false;
 			if (this._copilotIgnoreEnabled !== copilotIgnoreEnabled) {
@@ -81,7 +92,7 @@ export class BaseIgnoreService implements IIgnoreService {
 	}
 
 	get isEnabled(): boolean {
-		return this._copilotIgnoreEnabled;
+		return this._copilotIgnoreEnabled || this._localFileExclusions.length > 0;
 	}
 
 	get isRegexExclusionsEnabled(): boolean {
@@ -89,6 +100,9 @@ export class BaseIgnoreService implements IIgnoreService {
 	}
 
 	public async isCopilotIgnored(file: URI, token?: CancellationToken): Promise<boolean> {
+		if (this.isLocallyIgnored(file)) {
+			return true;
+		}
 		let copilotIgnored = false;
 		if (this._copilotIgnoreEnabled) {
 			const localCopilotIgnored = this._copilotIgnoreFiles.isIgnored(file);
@@ -99,19 +113,19 @@ export class BaseIgnoreService implements IIgnoreService {
 
 
 	async asMinimatchPattern(): Promise<string | undefined> {
-		if (!this._copilotIgnoreEnabled) {
-			return;
-		}
 		const all: string[][] = [];
 
-		const gitRepoRoots = (await this.searchService.findFiles('**/.git/HEAD', {
-			useExcludeSettings: ExcludeSettingOptions.None,
-		})).map(uri => URI.joinPath(uri, '..', '..'));
-		// Loads the repositories in prior to requesting the patterns so that they're "discovered" and available
-		await this._remoteContentExclusions?.loadRepos(gitRepoRoots);
+		if (this._copilotIgnoreEnabled) {
+			const gitRepoRoots = (await this.searchService.findFiles('**/.git/HEAD', {
+				useExcludeSettings: ExcludeSettingOptions.None,
+			})).map(uri => URI.joinPath(uri, '..', '..'));
+			// Loads the repositories in prior to requesting the patterns so that they're "discovered" and available
+			await this._remoteContentExclusions?.loadRepos(gitRepoRoots);
 
-		all.push(await this._remoteContentExclusions?.asMinimatchPatterns() ?? []);
-		all.push(this._copilotIgnoreFiles.asMinimatchPatterns());
+			all.push(await this._remoteContentExclusions?.asMinimatchPatterns() ?? []);
+			all.push(this._copilotIgnoreFiles.asMinimatchPatterns());
+		}
+		all.push(this._localFileExclusions.map(pattern => pattern.includes('/') ? pattern : `**/${pattern}`));
 
 		const allall = all.flat();
 		if (allall.length === 0) {
@@ -121,6 +135,15 @@ export class BaseIgnoreService implements IIgnoreService {
 		} else {
 			return `{${allall.join(',')}}`;
 		}
+	}
+
+	private readLocalFileExclusions(): readonly string[] {
+		return this._configurationService.getNonExtensionConfig<string[]>(COPILOT_IGNORE_CONFIG_KEY)?.filter(pattern => pattern.trim().length > 0) ?? [];
+	}
+
+	private isLocallyIgnored(file: URI): boolean {
+		const workspaceFolder = this._workspaceService.getWorkspaceFolder(file);
+		return matchesLocalFileExclusion(file, workspaceFolder, this._localFileExclusions);
 	}
 
 	private _init: Promise<void> | undefined;
@@ -173,4 +196,10 @@ export class BaseIgnoreService implements IIgnoreService {
 			this.trackIgnoreFile(workspaceUri, file, contents);
 		}
 	}
+}
+
+export function matchesLocalFileExclusion(file: URI, workspaceFolder: URI | undefined, patterns: readonly string[]): boolean {
+	const relativePath = workspaceFolder ? relative(workspaceFolder.fsPath, file.fsPath).replaceAll('\\', '/') : undefined;
+	const paths = relativePath ? [relativePath, file.path] : [file.path];
+	return patterns.some(pattern => paths.some(path => minimatch(path, pattern, { dot: true, matchBase: true, nocase: true, nonegate: true })));
 }
