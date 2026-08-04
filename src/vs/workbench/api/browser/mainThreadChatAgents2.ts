@@ -117,6 +117,7 @@ export class MainThreadChatAgents2 extends Disposable implements MainThreadChatA
 	private readonly _customizationProviderEmitters = this._register(new DisposableMap<number, Emitter<void>>());
 
 	private readonly _pendingProgress = new Map<string, { progress: (parts: IChatProgress[]) => void; chatSession: IChatModel | undefined; isSubagent: boolean }>();
+	private readonly _pendingUserInputSessions = new Map<string, URI>();
 	private readonly _proxy: ExtHostChatAgentsShape2;
 
 	private readonly _activeTasks = new Map<string, IChatTask>();
@@ -166,6 +167,33 @@ export class MainThreadChatAgents2 extends Disposable implements MainThreadChatA
 		}));
 		this._register(this._chatService.onDidReceiveQuestionCarouselAnswer(e => {
 			this._proxy.$handleQuestionCarouselAnswer(e.requestId, e.resolveId, e.answers);
+			const sessionResource = this._pendingUserInputSessions.get(e.resolveId);
+			if (sessionResource) {
+				this._pendingUserInputSessions.delete(e.resolveId);
+				this._proxy.$onDidResolveUserInput({
+					sessionResource,
+					requestId: e.requestId,
+					resolveId: e.resolveId,
+					answers: e.answers,
+				});
+			}
+		}));
+		this._register(this._chatService.onDidRequestUserInput(e => {
+			this._pendingUserInputSessions.set(e.resolveId, e.sessionResource);
+			this._proxy.$onDidRequestUserInput({
+				sessionResource: e.sessionResource,
+				requestId: e.requestId,
+				resolveId: e.resolveId,
+				questions: e.questions.map(q => ({
+					id: q.id,
+					type: q.type,
+					title: q.title,
+					message: typeof q.message === 'string' ? q.message : q.message?.value,
+					options: q.options,
+					defaultValue: q.defaultValue,
+					allowFreeformInput: q.allowFreeformInput,
+				})),
+			});
 		}));
 		this._register(this._chatService.onDidCompleteAgentResponse(e => {
 			this._fireAgentStop(e);

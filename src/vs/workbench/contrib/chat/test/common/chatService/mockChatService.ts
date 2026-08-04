@@ -165,6 +165,8 @@ export class MockChatService implements IChatService {
 
 	readonly onDidReceiveQuestionCarouselAnswer = Event.None;
 
+	readonly onDidRequestUserInput = Event.None;
+
 	notifyQuestionCarouselAnswer(_requestId: string, _resolveId: string, _answers: Record<string, unknown> | undefined): void { }
 
 	async transferChatSession(): Promise<void> { }

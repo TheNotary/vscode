@@ -28,7 +28,7 @@ import { LocalChatSessionUri } from '../../contrib/chat/common/model/chatUri.js'
 import { ChatAgentLocation } from '../../contrib/chat/common/constants.js';
 import { checkProposedApiEnabled, isProposedApiEnabled } from '../../services/extensions/common/extensions.js';
 import { Dto } from '../../services/extensions/common/proxyIdentifier.js';
-import { ExtHostChatAgentsShape2, IActiveChatSessionDto, IChatAgentCompletionItem, IChatAgentHistoryEntryDto, IChatAgentInvokeResult, IChatAgentProgressShape, IChatAgentStopEventDto, IChatSessionCustomizationItemDto, IChatSessionCustomizationProviderMetadataDto, IChatSessionCustomizationSourceFolderDto, IChatProgressDto, IChatSessionContextDto, ICustomAgentDto, IExtensionChatAgentMetadata, IHookDto, IInstructionDto, IMainContext, IPluginDto, ISkillDto, ISlashCommandDto, MainContext, MainThreadChatAgentsShape2 } from './extHost.protocol.js';
+import { ExtHostChatAgentsShape2, IActiveChatSessionDto, IChatAgentCompletionItem, IChatAgentHistoryEntryDto, IChatAgentInvokeResult, IChatAgentProgressShape, IChatAgentStopEventDto, IChatSessionCustomizationItemDto, IChatSessionCustomizationProviderMetadataDto, IChatSessionCustomizationSourceFolderDto, IChatProgressDto, IChatSessionContextDto, IChatUserInputRequestedDto, IChatUserInputResolvedDto, ICustomAgentDto, IExtensionChatAgentMetadata, IHookDto, IInstructionDto, IMainContext, IPluginDto, ISkillDto, ISlashCommandDto, MainContext, MainThreadChatAgentsShape2 } from './extHost.protocol.js';
 import { CommandsConverter, ExtHostCommands } from './extHostCommands.js';
 import { ExtHostDiagnostics } from './extHostDiagnostics.js';
 import { ExtHostDocuments } from './extHostDocuments.js';
@@ -524,6 +524,12 @@ export class ExtHostChatAgents2 extends Disposable implements ExtHostChatAgentsS
 	private readonly _onDidStopAgent = this._register(new Emitter<vscode.ChatAgentStopEvent>());
 	readonly onDidStopAgent = this._onDidStopAgent.event;
 
+	private readonly _onDidRequestUserInput = this._register(new Emitter<vscode.ChatUserInputRequestedEvent>());
+	readonly onDidRequestUserInput = this._onDidRequestUserInput.event;
+
+	private readonly _onDidResolveUserInput = this._register(new Emitter<vscode.ChatUserInputResolvedEvent>());
+	readonly onDidResolveUserInput = this._onDidResolveUserInput.event;
+
 	private readonly _customAgents = new CachedPromise(() => this._proxy.$provideCustomAgents(CancellationToken.None).then(agents => agents.map(agent => this.toCustomAgent(agent))));
 	private readonly _instructions = new CachedPromise(() => this._proxy.$provideInstructions(CancellationToken.None).then(instructions => instructions.map(instruction => this.toInstruction(instruction))));
 	private readonly _skills = new CachedPromise(() => this._proxy.$provideSkills(CancellationToken.None).then(skills => skills.map(skill => this.toSkill(skill))));
@@ -720,6 +726,32 @@ export class ExtHostChatAgents2 extends Disposable implements ExtHostChatAgentsS
 			completionTokens: event.completionTokens,
 			request: requestTurn,
 			response: responseTurn,
+		});
+	}
+
+	$onDidRequestUserInput(event: IChatUserInputRequestedDto): void {
+		this._onDidRequestUserInput.fire({
+			sessionResource: URI.revive(event.sessionResource),
+			requestId: event.requestId,
+			resolveId: event.resolveId,
+			questions: event.questions.map(q => Object.freeze({
+				id: q.id,
+				type: q.type as vscode.ChatUserInputQuestionType,
+				title: q.title,
+				message: q.message,
+				options: q.options?.map(o => Object.freeze({ id: o.id, label: o.label, value: o.value })),
+				defaultValue: q.defaultValue,
+				allowFreeformInput: q.allowFreeformInput,
+			})),
+		});
+	}
+
+	$onDidResolveUserInput(event: IChatUserInputResolvedDto): void {
+		this._onDidResolveUserInput.fire({
+			sessionResource: URI.revive(event.sessionResource),
+			requestId: event.requestId,
+			resolveId: event.resolveId,
+			answers: event.answers,
 		});
 	}
 

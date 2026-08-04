@@ -1756,6 +1756,14 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
 				return _asExtensionEvent(extHostChatAgents2.onDidStopAgent)(listeners, thisArgs, disposables);
 			},
+			onDidRequestUserInput: (listeners, thisArgs?, disposables?) => {
+				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
+				return _asExtensionEvent(extHostChatAgents2.onDidRequestUserInput)(listeners, thisArgs, disposables);
+			},
+			onDidResolveUserInput: (listeners, thisArgs?, disposables?) => {
+				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
+				return _asExtensionEvent(extHostChatAgents2.onDidResolveUserInput)(listeners, thisArgs, disposables);
+			},
 			updateQuotas: (quotas: vscode.ChatQuotaSnapshots) => {
 				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
 				extHostChatQuota.updateQuotas(quotas);
@@ -2307,6 +2315,7 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 			ChatReferenceBinaryData: extHostTypes.ChatReferenceBinaryData,
 			ChatRequestEditedFileEventKind: extHostTypes.ChatRequestEditedFileEventKind,
 			ChatModeKind: extHostTypes.ChatModeKind,
+			ChatUserInputQuestionType: extHostTypes.ChatUserInputQuestionType,
 			AuthorChatMessagePermissions: extHostTypes.AuthorChatMessagePermissions,
 			AuthorChatMessageErrorCode: extHostTypes.AuthorChatMessageErrorCode,
 			LanguageModelChatMessageRole: extHostTypes.LanguageModelChatMessageRole,

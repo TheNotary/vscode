@@ -987,6 +987,8 @@ export default defineConfig(
 						'register',
 						'remove',
 						'rename',
+						'request',
+						'resolve',
 						'save',
 						'send',
 						'start',
