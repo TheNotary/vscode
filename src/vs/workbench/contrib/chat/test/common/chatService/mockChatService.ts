@@ -159,6 +159,8 @@ export class MockChatService implements IChatService {
 
 	readonly onDidPerformUserAction = Event.None;
 
+	readonly onDidCompleteAgentResponse = Event.None;
+
 	notifyUserAction(_event: IChatUserActionEvent): void { }
 
 	readonly onDidReceiveQuestionCarouselAnswer = Event.None;

@@ -3452,6 +3452,13 @@ export namespace ChatResponsePart {
 
 		return undefined;
 	}
+
+	export function toContentWithTools(part: extHostProtocol.IChatStopResponsePartDto, commandsConverter: CommandsConverter): vscode.ChatResponseMarkdownPart | vscode.ChatResponseFileTreePart | vscode.ChatResponseAnchorPart | vscode.ChatResponseCommandButtonPart | vscode.ChatToolInvocationPart | undefined {
+		if (part.kind === 'toolInvocationSerialized') {
+			return ChatToolInvocationPart.to(part);
+		}
+		return toContent(part, commandsConverter);
+	}
 }
 
 export namespace ChatAgentRequest {
