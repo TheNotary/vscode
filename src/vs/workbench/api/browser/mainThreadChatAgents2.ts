@@ -32,18 +32,18 @@ import { AddDynamicVariableAction, IAddDynamicVariableContext } from '../../cont
 import { IChatAgentHistoryEntry, IChatAgentImplementation, IChatAgentRequest, IChatAgentService } from '../../contrib/chat/common/participants/chatAgents.js';
 import { IAgentSkill, IChatPromptSlashCommand, ICustomAgent, IInstructionFile, IPromptFileContext, IPromptPath, IPromptsService, PromptsStorage } from '../../contrib/chat/common/promptSyntax/service/promptsService.js';
 import { isValidPromptType, PromptsType } from '../../contrib/chat/common/promptSyntax/promptTypes.js';
-import { IChatModel, IChatResponseModel } from '../../contrib/chat/common/model/chatModel.js';
-import { ChatRequestAgentPart } from '../../contrib/chat/common/requestParser/chatParserTypes.js';
+import { IChatModel, IChatResponseModel, toChatHistoryContent, updateRanges } from '../../contrib/chat/common/model/chatModel.js';
+import { ChatRequestAgentPart, getPromptText } from '../../contrib/chat/common/requestParser/chatParserTypes.js';
 import { ChatRequestParser, IChatParserContext } from '../../contrib/chat/common/requestParser/chatRequestParser.js';
 import { getDynamicVariablesForWidget, getSelectedToolAndToolSetsForWidget } from '../../contrib/chat/browser/attachments/chatVariables.js';
-import { IChatContentInlineReference, IChatContentReference, IChatFollowup, IChatNotebookEdit, IChatProgress, IChatService, IChatTask, IChatTaskSerialized, IChatWarningMessage } from '../../contrib/chat/common/chatService/chatService.js';
+import { IChatCompleteResponseEvent, IChatContentInlineReference, IChatContentReference, IChatFollowup, IChatNotebookEdit, IChatProgress, IChatService, IChatTask, IChatTaskSerialized, IChatWarningMessage } from '../../contrib/chat/common/chatService/chatService.js';
 import { ChatSessionOptionsMap, IChatSessionsService } from '../../contrib/chat/common/chatSessionsService.js';
 import { ChatAgentLocation, ChatModeKind } from '../../contrib/chat/common/constants.js';
 import { ILanguageModelToolsService } from '../../contrib/chat/common/tools/languageModelToolsService.js';
 import { IExtHostContext, extHostNamedCustomer } from '../../services/extensions/common/extHostCustomers.js';
 import { IExtensionService } from '../../services/extensions/common/extensions.js';
 import { Dto } from '../../services/extensions/common/proxyIdentifier.js';
-import { ExtHostChatAgentsShape2, ExtHostContext, IActiveChatSessionDto, IChatAgentInvokeResult, IChatSessionCustomizationItemDto, IChatSessionCustomizationProviderMetadataDto, IChatNotebookEditDto, IChatParticipantMetadata, IChatProgressDto, IChatSessionContextDto, ICustomAgentDto, IDynamicChatAgentProps, IExtensionChatAgentMetadata, IHookDto, IInstructionDto, IPluginDto, ISkillDto, ISlashCommandDto, MainContext, MainThreadChatAgentsShape2 } from '../common/extHost.protocol.js';
+import { ExtHostChatAgentsShape2, ExtHostContext, IActiveChatSessionDto, IChatAgentInvokeResult, IChatAgentStopEventDto, IChatSessionCustomizationItemDto, IChatSessionCustomizationProviderMetadataDto, IChatNotebookEditDto, IChatParticipantMetadata, IChatProgressDto, IChatSessionContextDto, ICustomAgentDto, IDynamicChatAgentProps, IExtensionChatAgentMetadata, IHookDto, IInstructionDto, IPluginDto, ISkillDto, ISlashCommandDto, MainContext, MainThreadChatAgentsShape2 } from '../common/extHost.protocol.js';
 import { NotebookDto } from './mainThreadNotebookDto.js';
 import { getChatSessionType, isUntitledChatSession } from '../../contrib/chat/common/model/chatUri.js';
 import { ICustomizationHarnessService, ICustomizationItem, ICustomizationItemProvider, IHarnessDescriptor } from '../../contrib/chat/common/customizationHarnessService.js';
@@ -167,6 +167,9 @@ export class MainThreadChatAgents2 extends Disposable implements MainThreadChatA
 		this._register(this._chatService.onDidReceiveQuestionCarouselAnswer(e => {
 			this._proxy.$handleQuestionCarouselAnswer(e.requestId, e.resolveId, e.answers);
 		}));
+		this._register(this._chatService.onDidCompleteAgentResponse(e => {
+			this._fireAgentStop(e);
+		}));
 		this._register(this._chatWidgetService.onDidChangeFocusedSession(() => {
 			this._acceptActiveChatSession(this._chatWidgetService.lastFocusedWidget);
 		}));
@@ -228,6 +231,50 @@ export class MainThreadChatAgents2 extends Disposable implements MainThreadChatA
 			model.requestInProgress.read(reader);
 			this._proxy.$acceptActiveChatSession(buildDto());
 		}));
+	}
+
+	private _fireAgentStop(e: IChatCompleteResponseEvent): void {
+		const response = e.request.response;
+		if (!response) {
+			return;
+		}
+
+		const toolCallCount = response.entireResponse.value.filter(v => v.kind === 'toolInvocation').length;
+		const usage = response.usage;
+
+		// Build the request DTO
+		const promptTextResult = getPromptText(e.request.message);
+		const request: IChatAgentRequest = {
+			sessionResource: e.sessionResource,
+			requestId: e.request.id,
+			agentId: response.agent?.id ?? '',
+			message: promptTextResult.message,
+			command: response.slashCommand?.name,
+			variables: updateRanges(e.request.variableData, promptTextResult.diff),
+			location: ChatAgentLocation.Chat,
+			editedFileEvents: e.request.editedFileEvents,
+			modeInstructions: e.request.modeInfo?.modeInstructions,
+		};
+
+		// Build the response parts including tool invocations
+		const entireValue = response.entireResponse.value;
+		const contentParts = toChatHistoryContent(entireValue);
+		const toolParts = entireValue
+			.filter(v => v.kind === 'toolInvocation' || v.kind === 'toolInvocationSerialized')
+			.map(v => v.kind === 'toolInvocation' ? v.toJSON() : v);
+		const responseParts = [...contentParts, ...toolParts];
+
+		const dto: IChatAgentStopEventDto = {
+			sessionResource: e.sessionResource,
+			agentId: response.agent?.id ?? '',
+			result: response.result,
+			toolCallCount,
+			promptTokens: usage?.promptTokens ?? 0,
+			completionTokens: usage?.completionTokens ?? 0,
+			request,
+			responseParts,
+		};
+		this._proxy.$onDidStopAgent(dto);
 	}
 
 	private _toChatResourceSource(storage: PromptsStorage): ICustomAgentDto['source'] {

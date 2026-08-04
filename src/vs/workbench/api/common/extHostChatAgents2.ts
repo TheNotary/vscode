@@ -28,7 +28,7 @@ import { LocalChatSessionUri } from '../../contrib/chat/common/model/chatUri.js'
 import { ChatAgentLocation } from '../../contrib/chat/common/constants.js';
 import { checkProposedApiEnabled, isProposedApiEnabled } from '../../services/extensions/common/extensions.js';
 import { Dto } from '../../services/extensions/common/proxyIdentifier.js';
-import { ExtHostChatAgentsShape2, IActiveChatSessionDto, IChatAgentCompletionItem, IChatAgentHistoryEntryDto, IChatAgentInvokeResult, IChatAgentProgressShape, IChatSessionCustomizationItemDto, IChatSessionCustomizationProviderMetadataDto, IChatSessionCustomizationSourceFolderDto, IChatProgressDto, IChatSessionContextDto, ICustomAgentDto, IExtensionChatAgentMetadata, IHookDto, IInstructionDto, IMainContext, IPluginDto, ISkillDto, ISlashCommandDto, MainContext, MainThreadChatAgentsShape2 } from './extHost.protocol.js';
+import { ExtHostChatAgentsShape2, IActiveChatSessionDto, IChatAgentCompletionItem, IChatAgentHistoryEntryDto, IChatAgentInvokeResult, IChatAgentProgressShape, IChatAgentStopEventDto, IChatSessionCustomizationItemDto, IChatSessionCustomizationProviderMetadataDto, IChatSessionCustomizationSourceFolderDto, IChatProgressDto, IChatSessionContextDto, ICustomAgentDto, IExtensionChatAgentMetadata, IHookDto, IInstructionDto, IMainContext, IPluginDto, ISkillDto, ISlashCommandDto, MainContext, MainThreadChatAgentsShape2 } from './extHost.protocol.js';
 import { CommandsConverter, ExtHostCommands } from './extHostCommands.js';
 import { ExtHostDiagnostics } from './extHostDiagnostics.js';
 import { ExtHostDocuments } from './extHostDocuments.js';
@@ -521,6 +521,9 @@ export class ExtHostChatAgents2 extends Disposable implements ExtHostChatAgentsS
 	private readonly _onDidChangePlugins = this._register(new Emitter<void>());
 	readonly onDidChangePlugins = this._onDidChangePlugins.event;
 
+	private readonly _onDidStopAgent = this._register(new Emitter<vscode.ChatAgentStopEvent>());
+	readonly onDidStopAgent = this._onDidStopAgent.event;
+
 	private readonly _customAgents = new CachedPromise(() => this._proxy.$provideCustomAgents(CancellationToken.None).then(agents => agents.map(agent => this.toCustomAgent(agent))));
 	private readonly _instructions = new CachedPromise(() => this._proxy.$provideInstructions(CancellationToken.None).then(instructions => instructions.map(instruction => this.toInstruction(instruction))));
 	private readonly _skills = new CachedPromise(() => this._proxy.$provideSkills(CancellationToken.None).then(skills => skills.map(skill => this.toSkill(skill))));
@@ -671,6 +674,53 @@ export class ExtHostChatAgents2 extends Disposable implements ExtHostChatAgentsS
 	$onDidChangePlugins(): void {
 		this._plugins.clear();
 		this._onDidChangePlugins.fire();
+	}
+
+	$onDidStopAgent(event: IChatAgentStopEventDto): void {
+		const result = event.result ? typeConvert.ChatAgentResult.to(event.result) : undefined;
+
+		// Build the request turn
+		const varsWithoutTools: vscode.ChatPromptReference[] = [];
+		const toolReferences: vscode.ChatLanguageModelToolReference[] = [];
+		for (const v of event.request.variables.variables) {
+			if (v.kind === 'tool') {
+				toolReferences.push(typeConvert.ChatLanguageModelToolReference.to(v));
+			} else if (v.kind === 'toolset') {
+				toolReferences.push(...v.value.map(typeConvert.ChatLanguageModelToolReference.to));
+			} else {
+				const ref = typeConvert.ChatPromptReference.to(v, undefined, this._logService);
+				if (ref) {
+					varsWithoutTools.push(ref);
+				}
+			}
+		}
+		const modeInstructions2 = event.request.modeInstructions ? typeConvert.ChatRequestModeInstructions.to(event.request.modeInstructions) : undefined;
+		const requestTurn = new extHostTypes.ChatRequestTurn(
+			event.request.message,
+			event.request.command,
+			varsWithoutTools,
+			event.request.agentId,
+			toolReferences,
+			event.request.editedFileEvents,
+			event.request.requestId,
+			undefined,
+			modeInstructions2,
+		);
+
+		// Build the response turn with tool invocations
+		const responseParts = coalesce(event.responseParts.map(r => typeConvert.ChatResponsePart.toContentWithTools(r, this._commands.converter)));
+		const responseTurn = new extHostTypes.ChatResponseTurn2(responseParts, result ?? {}, event.agentId);
+
+		this._onDidStopAgent.fire({
+			sessionResource: URI.revive(event.sessionResource),
+			agent: event.agentId,
+			result,
+			toolCallCount: event.toolCallCount,
+			promptTokens: event.promptTokens,
+			completionTokens: event.completionTokens,
+			request: requestTurn,
+			response: responseTurn,
+		});
 	}
 
 	constructor(

@@ -1752,6 +1752,10 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
 				return _asExtensionEvent(extHostChatAgents2.onDidDisposeChatSession)(listeners, thisArgs, disposables);
 			},
+			onDidStopAgent: (listeners, thisArgs?, disposables?) => {
+				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
+				return _asExtensionEvent(extHostChatAgents2.onDidStopAgent)(listeners, thisArgs, disposables);
+			},
 			updateQuotas: (quotas: vscode.ChatQuotaSnapshots) => {
 				checkProposedApiEnabled(extension, 'chatParticipantPrivate');
 				extHostChatQuota.updateQuotas(quotas);

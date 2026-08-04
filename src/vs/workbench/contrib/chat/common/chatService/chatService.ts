@@ -1821,11 +1821,18 @@ export type IChatModelReference = IReference<IChatModel>;
 
 export const IChatService = createDecorator<IChatService>('IChatService');
 
+export interface IChatCompleteResponseEvent {
+	readonly sessionResource: URI;
+	readonly request: IChatRequestModel;
+}
+
 export interface IChatService {
 	_serviceBrand: undefined;
 	transferredSessionResource: URI | undefined;
 
 	readonly onDidSubmitRequest: Event<{ readonly chatSessionResource: URI; readonly message?: IParsedChatRequest }>;
+
+	readonly onDidCompleteAgentResponse: Event<IChatCompleteResponseEvent>;
 
 	readonly onDidCreateModel: Event<IChatModel>;
 

@@ -990,6 +990,7 @@ export default defineConfig(
 						'save',
 						'send',
 						'start',
+						'stop',
 						'terminate',
 						'trigger',
 						'unregister',

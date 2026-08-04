@@ -380,10 +380,34 @@ declare module 'vscode' {
 		provideParticipantDetection(chatRequest: ChatRequest, context: ChatContext, options: { participants?: ChatParticipantMetadata[]; location: ChatLocation }, token: CancellationToken): ProviderResult<ChatParticipantDetectionResult>;
 	}
 
+	export interface ChatAgentStopEvent {
+		/** The URI of the chat session in which the agent stopped. */
+		readonly sessionResource: Uri;
+		/** The identifier of the agent (chat participant) that stopped. */
+		readonly agent: string;
+		/** The result returned by the agent, if any. */
+		readonly result: ChatResult | undefined;
+		/** The total number of tool invocations made during this agent response. */
+		readonly toolCallCount: number;
+		/** The number of prompt (input) tokens consumed, or 0 if unavailable. */
+		readonly promptTokens: number;
+		/** The number of completion (output) tokens consumed, or 0 if unavailable. */
+		readonly completionTokens: number;
+		/** The request that triggered this agent response. */
+		readonly request: ChatRequestTurn2;
+		/** The full response from the agent, including tool invocations and subagent data. */
+		readonly response: ChatResponseTurn2;
+	}
+
 	export namespace chat {
 		export function registerChatParticipantDetectionProvider(participantDetectionProvider: ChatParticipantDetectionProvider): Disposable;
 
 		export const onDidDisposeChatSession: Event<string>;
+
+		/**
+		 * An event that fires whenever a chat agent stops.
+		 */
+		export const onDidStopAgent: Event<ChatAgentStopEvent>;
 
 		/**
 		 * Returns all available chat modes (builtin and custom). Use the
