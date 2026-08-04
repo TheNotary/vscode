@@ -1750,6 +1750,30 @@ export interface IChatAgentStopEventDto {
 	readonly responseParts: ReadonlyArray<IChatStopResponsePartDto>;
 }
 
+export interface IChatQuestionDto {
+	readonly id: string;
+	readonly type: 'text' | 'singleSelect' | 'multiSelect';
+	readonly title: string;
+	readonly message?: string;
+	readonly options?: readonly { readonly id: string; readonly label: string; readonly value: string }[];
+	readonly defaultValue?: string | readonly string[];
+	readonly allowFreeformInput?: boolean;
+}
+
+export interface IChatUserInputRequestedDto {
+	readonly sessionResource: UriComponents;
+	readonly requestId: string;
+	readonly resolveId: string;
+	readonly questions: readonly IChatQuestionDto[];
+}
+
+export interface IChatUserInputResolvedDto {
+	readonly sessionResource: UriComponents;
+	readonly requestId: string;
+	readonly resolveId: string;
+	readonly answers: Record<string, unknown> | undefined;
+}
+
 export interface IChatAgentInvokeResult extends IChatAgentResult {
 	/** Error callstack for telemetry only. Stripped at the RPC boundary — never persisted or sent to the model. */
 	errorCallstack?: string;
@@ -1781,6 +1805,8 @@ export interface ExtHostChatAgentsShape2 {
 	$onDidChangeHooks(): void;
 	$onDidChangePlugins(): void;
 	$onDidStopAgent(event: IChatAgentStopEventDto): void;
+	$onDidRequestUserInput(event: IChatUserInputRequestedDto): void;
+	$onDidResolveUserInput(event: IChatUserInputResolvedDto): void;
 }
 
 export type IChatResourceSourceDto = 'local' | 'user' | 'extension' | 'plugin' | 'builtin';

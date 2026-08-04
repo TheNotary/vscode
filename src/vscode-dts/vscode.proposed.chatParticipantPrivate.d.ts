@@ -399,6 +399,75 @@ declare module 'vscode' {
 		readonly response: ChatResponseTurn2;
 	}
 
+	/**
+	 * An option in a {@link ChatUserInputQuestion}.
+	 */
+	export interface ChatUserInputQuestionOption {
+		readonly id: string;
+		readonly label: string;
+		readonly value: string;
+	}
+
+	/**
+	 * The type of a {@link ChatUserInputQuestion}.
+	 */
+	export enum ChatUserInputQuestionType {
+		/** A free-text input question. */
+		Text = 'text',
+		/** A single-select question with predefined options. */
+		SingleSelect = 'singleSelect',
+		/** A multi-select question with predefined options. */
+		MultiSelect = 'multiSelect',
+	}
+
+	/**
+	 * A question presented to the user in a question carousel.
+	 */
+	export interface ChatUserInputQuestion {
+		/** Unique identifier for the question within the carousel. */
+		readonly id: string;
+		/** The input type: free text, single-select, or multi-select. */
+		readonly type: ChatUserInputQuestionType;
+		/** Short title or header for the question. */
+		readonly title: string;
+		/** Optional longer message displayed below the title. */
+		readonly message?: string;
+		/** Selectable options for single-select or multi-select questions. */
+		readonly options?: readonly ChatUserInputQuestionOption[];
+		/** Default selected value(s). */
+		readonly defaultValue?: string | readonly string[];
+		/** Whether the user can type a freeform answer in addition to selecting options. */
+		readonly allowFreeformInput?: boolean;
+	}
+
+	/**
+	 * Fired when a question carousel is shown to the user.
+	 */
+	export interface ChatUserInputRequestedEvent {
+		/** The URI of the chat session. */
+		readonly sessionResource: Uri;
+		/** The chat request that triggered the questions. */
+		readonly requestId: string;
+		/** Unique identifier for this carousel instance, correlating request and resolve events. */
+		readonly resolveId: string;
+		/** The questions presented to the user. */
+		readonly questions: readonly ChatUserInputQuestion[];
+	}
+
+	/**
+	 * Fired when the user answers or dismisses a question carousel.
+	 */
+	export interface ChatUserInputResolvedEvent {
+		/** The URI of the chat session. */
+		readonly sessionResource: Uri;
+		/** The chat request that triggered the questions. */
+		readonly requestId: string;
+		/** Unique identifier for this carousel instance, correlating request and resolve events. */
+		readonly resolveId: string;
+		/** The user's answers keyed by question ID, or `undefined` if the carousel was dismissed/skipped. */
+		readonly answers: Readonly<Record<string, unknown>> | undefined;
+	}
+
 	export namespace chat {
 		export function registerChatParticipantDetectionProvider(participantDetectionProvider: ChatParticipantDetectionProvider): Disposable;
 
@@ -408,6 +477,20 @@ declare module 'vscode' {
 		 * An event that fires whenever a chat agent stops.
 		 */
 		export const onDidStopAgent: Event<ChatAgentStopEvent>;
+
+		/**
+		 * An event that fires whenever the user is prompted with a question carousel.
+		 * Use {@link ChatUserInputRequestedEvent.resolveId resolveId} to correlate with
+		 * the corresponding {@link onDidResolveUserInput} event.
+		 */
+		export const onDidRequestUserInput: Event<ChatUserInputRequestedEvent>;
+
+		/**
+		 * An event that fires whenever the user answers or dismisses a question carousel.
+		 * Use {@link ChatUserInputResolvedEvent.resolveId resolveId} to correlate with
+		 * the corresponding {@link onDidRequestUserInput} event.
+		 */
+		export const onDidResolveUserInput: Event<ChatUserInputResolvedEvent>;
 
 		/**
 		 * Returns all available chat modes (builtin and custom). Use the

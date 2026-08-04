@@ -3106,6 +3106,12 @@ export enum ChatModeKind {
 	Agent = 'agent',
 }
 
+export enum ChatUserInputQuestionType {
+	Text = 'text',
+	SingleSelect = 'singleSelect',
+	MultiSelect = 'multiSelect',
+}
+
 export enum AuthorChatMessagePermissions {
 	Default = 'default',
 	AutoApprove = 'autoApprove',
