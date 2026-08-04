@@ -228,6 +228,11 @@ export function ensureCopilotPlatformPackage(platform: string, arch: string, nod
  * `node-pty` from the embedder (VS Code) via `hostRequire` and falls back to
  * its bundled copy only if that fails.
  *
+ * Since @github/copilot 1.0.65, the base package no longer ships an SDK of
+ * its own (it's a slim `npm-loader` stub); the SDK entrypoint is
+ * materialized from the selected `@github/copilot-{platform}` package too,
+ * see {@link materializeBuiltInCopilotSdkEntrypoint}.
+ *
  * Failures throw to fail the build because built-in packaging must guarantee
  * this artifact is present.
  */
@@ -240,8 +245,14 @@ export function prepareBuiltInCopilotRipgrepShim(platform: string, arch: string,
 	const extensionNodeModules = path.join(builtInCopilotExtensionDir, 'node_modules');
 	const copilotBase = path.join(extensionNodeModules, '@github', 'copilot');
 	const copilotSdkBase = path.join(copilotBase, 'sdk');
-	if (!fs.existsSync(copilotSdkBase)) {
-		throw new Error(`[prepareBuiltInCopilotRipgrepShim] Copilot SDK directory not found at ${copilotSdkBase}`);
+	if (!fs.existsSync(path.join(copilotSdkBase, 'index.js'))) {
+		// Starting with @github/copilot 1.0.65, the base package ships as a
+		// slim `npm-loader` stub (just npm-loader.js + package.json) with no
+		// SDK payload of its own. The actual SDK entrypoint (sdk/index.js,
+		// sdk/index.d.ts) now ships entirely inside the platform-specific
+		// `@github/copilot-{platform}` optional dependency. Materialize it
+		// before filling in the native/ripgrep/tgrep payloads below.
+		materializeBuiltInCopilotSdkEntrypoint(copilotPackagePlatformArch, copilotSdkBase, appNodeModulesDir);
 	}
 	materializeBuiltInCopilotSdkPlatformFiles(copilotPackagePlatformArch, tgrepPlatformArch, copilotBase, appNodeModulesDir);
 	pruneNonTargetCopilotSdkPrebuilds(copilotPackagePlatformArch, path.join(copilotSdkBase, 'prebuilds'), copilotPlatforms);
@@ -274,6 +285,31 @@ export function prepareBuiltInCopilotRipgrepShim(platform: string, arch: string,
 	} catch (err) {
 		throw new Error(`[prepareBuiltInCopilotRipgrepShim] Failed to materialize ripgrep shim for ${platformArch}: ${err}`);
 	}
+}
+
+/**
+ * Copies the SDK entrypoint (`sdk/index.js`, `sdk/index.d.ts`) from the
+ * selected `@github/copilot-{platform}` package into the built-in
+ * extension's copy of `@github/copilot`.
+ *
+ * Needed because `@github/copilot` 1.0.65+ ships as a slim `npm-loader`
+ * stub with no SDK payload of its own; the real SDK now lives entirely
+ * inside the platform package (which is itself a full copy of the
+ * pre-1.0.65 `@github/copilot` package layout, just platform-specific).
+ */
+function materializeBuiltInCopilotSdkEntrypoint(copilotPackagePlatformArch: string, copilotSdkBase: string, appNodeModulesDir: string): void {
+	if (!copilotPlatforms.includes(copilotPackagePlatformArch)) {
+		throw new Error(`[prepareBuiltInCopilotRipgrepShim] Unsupported Copilot platform/arch: ${copilotPackagePlatformArch}`);
+	}
+
+	const platformPackageDir = path.join(appNodeModulesDir, '@github', `copilot-${copilotPackagePlatformArch}`);
+	const platformSdkDir = path.join(platformPackageDir, 'sdk');
+	if (!fs.existsSync(platformSdkDir)) {
+		throw new Error(`[prepareBuiltInCopilotRipgrepShim] Copilot SDK entrypoint not found at ${platformSdkDir}`);
+	}
+
+	fs.mkdirSync(copilotSdkBase, { recursive: true });
+	fs.cpSync(platformSdkDir, copilotSdkBase, { recursive: true });
 }
 
 function materializeBuiltInCopilotSdkPlatformFiles(copilotPackagePlatformArch: string, tgrepPlatformArch: string, copilotBase: string, appNodeModulesDir: string): void {
