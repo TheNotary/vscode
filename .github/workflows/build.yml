@@ -1,0 +1,205 @@
+name: Build Code OSS
+
+on:
+  push:
+    branches:
+      - 'main'
+      - '*-trial'
+      - 'release/*'
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      build_linux:
+        description: 'Build Linux x64'
+        type: boolean
+        default: true
+      build_linux_arm64:
+        description: 'Build Linux arm64'
+        type: boolean
+        default: true
+      build_windows:
+        description: 'Build Windows x64'
+        type: boolean
+        default: true
+      build_windows_arm64:
+        description: 'Build Windows arm64'
+        type: boolean
+        default: true
+      build_macos:
+        description: 'Build macOS arm64'
+        type: boolean
+        default: true
+      upstream_commit:
+        description: 'Upstream VS Code commit SHA to stamp into product.commit. Leave empty to auto-resolve to the most recent upstream stable release tag (e.g. 1.117.0) reachable from HEAD.'
+        type: string
+        default: ''
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  VSCODE_QUALITY: 'stable'
+
+jobs:
+
+  # ─────────────────────────────────────────
+  # Resolve upstream commit
+  # ─────────────────────────────────────────
+  # Determines the upstream Microsoft VS Code release commit SHA stamped into
+  # product.commit. Used by the WSL/Remote server downloader to fetch a real
+  # artifact from update.code.visualstudio.com/commit:<sha>/server-<plat>/stable.
+  # Either honors the workflow_dispatch input or finds the most recent upstream
+  # stable release tag (matching N.N.N) reachable from HEAD.
+  resolve-commit:
+    name: Resolve upstream commit
+    runs-on: ubuntu-22.04
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - name: Checkout (full history + tags)
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Resolve commit
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          INPUT_SHA="${{ inputs.upstream_commit }}"
+          if [ -n "$INPUT_SHA" ]; then
+            echo "Using workflow_dispatch input: $INPUT_SHA"
+            TAG="(input override)"
+            SHA="$INPUT_SHA"
+          else
+            echo "No workflow_dispatch input; resolving commit for this version from upstream..."
+            TAG=$(node -p "require('./package.json').version")
+            # The /commits/<ref> endpoint dereferences any ref (including
+            # annotated tags) to its underlying commit SHA.
+            SHA=$(gh api "repos/microsoft/vscode/commits/$TAG" --jq .sha)
+            echo "Resolved upstream tag $TAG -> $SHA (from microsoft/vscode API)"
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  # ────────────────────────────────────────────
+  # Linux x64
+  # ────────────────────────────────────────────
+  linux:
+    name: Linux x64
+    if: github.event_name != 'workflow_dispatch' || inputs.build_linux
+    needs: resolve-commit
+    uses: ./.github/workflows/build-platform.yml
+    with:
+      os: ubuntu-22.04
+      platform: linux
+      arch: x64
+      upstream_commit_sha: ${{ needs.resolve-commit.outputs.sha }}
+      portable_archive_ext: tar
+      install_build_tools: true
+      build_packages: true
+      deb_arch: amd64
+      rpm_arch: x86_64
+    secrets: inherit
+
+  # ────────────────────────────────────────────
+  # Linux arm64
+  # ────────────────────────────────────────────
+  linux-arm64:
+    name: Linux arm64
+    if: github.event_name != 'workflow_dispatch' || inputs.build_linux_arm64
+    needs: resolve-commit
+    uses: ./.github/workflows/build-platform.yml
+    with:
+      os: ubuntu-24.04-arm
+      platform: linux
+      arch: arm64
+      upstream_commit_sha: ${{ needs.resolve-commit.outputs.sha }}
+      portable_archive_ext: tar
+      install_build_tools: true
+      build_packages: true
+      deb_arch: arm64
+      rpm_arch: aarch64
+    secrets: inherit
+
+  # ────────────────────────────────────────────
+  # Windows x64
+  # ────────────────────────────────────────────
+  windows:
+    name: Windows x64
+    if: github.event_name != 'workflow_dispatch' || inputs.build_windows
+    needs: resolve-commit
+    uses: ./.github/workflows/build-platform.yml
+    with:
+      os: windows-latest
+      platform: win32
+      arch: x64
+      upstream_commit_sha: ${{ needs.resolve-commit.outputs.sha }}
+      node_arch: x64
+      patch_launcher: true
+      build_inno_updater: true
+    secrets: inherit
+
+  # ────────────────────────────────────────────
+  # Windows arm64 (cross-compiled on x64 host)
+  # ────────────────────────────────────────────
+  windows-arm64:
+    name: Windows arm64
+    if: github.event_name != 'workflow_dispatch' || inputs.build_windows_arm64
+    needs: resolve-commit
+    uses: ./.github/workflows/build-platform.yml
+    with:
+      os: windows-latest
+      platform: win32
+      arch: arm64
+      upstream_commit_sha: ${{ needs.resolve-commit.outputs.sha }}
+      node_arch: arm64
+      patch_launcher: true
+      build_inno_updater: true
+    secrets: inherit
+
+  # ────────────────────────────────────────────
+  # macOS arm64
+  # ────────────────────────────────────────────
+  macos:
+    name: macOS arm64
+    if: github.event_name != 'workflow_dispatch' || inputs.build_macos
+    needs: resolve-commit
+    uses: ./.github/workflows/build-platform.yml
+    with:
+      os: macos-latest
+      platform: darwin
+      arch: arm64
+      upstream_commit_sha: ${{ needs.resolve-commit.outputs.sha }}
+      node_arch: arm64
+      install_python_setuptools: true
+    secrets: inherit
+
+  # ────────────────────────────────────────────
+  # GitHub Release (on tag push only)
+  # ────────────────────────────────────────────
+  release:
+    name: Create Release
+    needs: [linux, linux-arm64, windows, windows-arm64, macos]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: artifacts/**/*
