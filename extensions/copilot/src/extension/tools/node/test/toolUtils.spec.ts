@@ -18,6 +18,7 @@ import { WorkingDirectory } from '../../../../platform/workspace/common/workingD
 import { CancellationToken } from '../../../../util/vs/base/common/cancellation';
 import { ResourceSet } from '../../../../util/vs/base/common/map';
 import { posix } from '../../../../util/vs/base/common/path';
+import { isWindows } from '../../../../util/vs/base/common/platform';
 import { URI } from '../../../../util/vs/base/common/uri';
 import { SyncDescriptor } from '../../../../util/vs/platform/instantiation/common/descriptors';
 import { IInstantiationService } from '../../../../util/vs/platform/instantiation/common/instantiation';
@@ -25,7 +26,7 @@ import { ChatVariablesCollection, CustomizationsIndexId } from '../../../prompt/
 import { IBuildPromptContext } from '../../../prompt/common/intents';
 import { createExtensionUnitTestingServices } from '../../../test/node/services';
 import { encodeUrlHostname } from '../../common/toolUtils';
-import { assertFileOkForTool, inputGlobToPattern, isDirExternalAndNeedsConfirmation, isFileExternalAndNeedsConfirmation } from '../toolUtils';
+import { assertFileOkForTool, InputGlobResult, inputGlobToPattern, isDirExternalAndNeedsConfirmation, isFileExternalAndNeedsConfirmation } from '../toolUtils';
 
 class TestIgnoreService extends NullIgnoreService {
 	private readonly _ignoredUris = new Set<string>();
@@ -706,6 +707,75 @@ describe('inputGlobToPattern - multi-root workspace', () => {
 		expect(result.patterns).toHaveLength(1);
 		expect(result.patterns[0]).toBe('src/**/*.ts');
 		expect(result.folderName).toBeUndefined();
+	});
+});
+
+describe('inputGlobToPattern - external paths', () => {
+	const workspaceService = new MultiRootWorkspaceService([URI.file('/workspace/vscode')]);
+	const workingDir = new WorkingDirectory(undefined, workspaceService);
+	const resolve = (path: string) => URI.file(path);
+	const summarize = (result: InputGlobResult) => ({
+		patterns: result.patterns.map(p => typeof p === 'string' ? p : { base: (p.baseUri as URI).path, pattern: p.pattern }),
+		externalBase: result.externalBaseUri?.path,
+	});
+
+	test('absolute glob outside workspace is scoped to its base folder', () => {
+		expect(summarize(inputGlobToPattern('/other/project/**/*.ts', workingDir, undefined, resolve))).toEqual({
+			patterns: [{ base: '/other/project', pattern: '**/*.ts' }],
+			externalBase: '/other/project',
+		});
+	});
+
+	test('absolute path without glob matches the file or folder', () => {
+		expect(summarize(inputGlobToPattern('/other/project/README.md', workingDir, undefined, resolve))).toEqual({
+			patterns: [{ base: '/other/project', pattern: 'README.md' }, { base: '/other/project', pattern: 'README.md/**' }],
+			externalBase: '/other/project',
+		});
+	});
+
+	test('gpt-4.1 gets an extra /** pattern for external globs', () => {
+		expect(summarize(inputGlobToPattern('/other/project/src/*', workingDir, 'gpt-4.1', resolve))).toEqual({
+			patterns: [{ base: '/other/project/src', pattern: '*' }, { base: '/other/project/src', pattern: '*/**' }],
+			externalBase: '/other/project/src',
+		});
+	});
+
+	test.skipIf(!isWindows)('windows path with backslashes', () => {
+		const resolved: string[] = [];
+		const result = inputGlobToPattern('C:\\other\\project\\**\\*.ts', workingDir, undefined, path => {
+			resolved.push(path);
+			return URI.file(path);
+		});
+		expect(resolved).toEqual(['C:/other/project']);
+		expect(result.patterns).toHaveLength(1);
+		expect(result.patterns[0]).toMatchObject({ pattern: '**/*.ts' });
+		expect(result.externalBaseUri).toBeDefined();
+	});
+
+	test('searching from the file system root throws', () => {
+		expect(() => inputGlobToPattern('/**/*.ts', workingDir, undefined, resolve)).toThrow(/root of the file system/);
+		expect(() => inputGlobToPattern('/', workingDir, undefined, resolve)).toThrow(/root of the file system/);
+	});
+
+	test('external path is left unchanged without a resolver', () => {
+		expect(summarize(inputGlobToPattern('/other/project/**/*.ts', workingDir, undefined))).toEqual({
+			patterns: ['/other/project/**/*.ts'],
+			externalBase: undefined,
+		});
+	});
+
+	test('external path is left unchanged when the resolver fails', () => {
+		expect(summarize(inputGlobToPattern('/other/project/**/*.ts', workingDir, undefined, () => undefined))).toEqual({
+			patterns: ['/other/project/**/*.ts'],
+			externalBase: undefined,
+		});
+	});
+
+	test('absolute path inside the workspace is not treated as external', () => {
+		expect(summarize(inputGlobToPattern('/workspace/vscode/src/**', workingDir, undefined, resolve))).toEqual({
+			patterns: [{ base: '/workspace/vscode', pattern: 'src/**' }],
+			externalBase: undefined,
+		});
 	});
 });
 

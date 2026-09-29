@@ -16,6 +16,7 @@ import { isWindows } from '../../../../util/vs/base/common/platform';
 import { URI } from '../../../../util/vs/base/common/uri';
 import { SyncDescriptor } from '../../../../util/vs/platform/instantiation/common/descriptors';
 import { IInstantiationService } from '../../../../util/vs/platform/instantiation/common/instantiation';
+import { IBuildPromptContext } from '../../../prompt/common/intents';
 import { createExtensionUnitTestingServices } from '../../../test/node/services';
 import { CopilotToolMode } from '../../common/toolsRegistry';
 import { FindFilesTool, IFindFilesToolParams } from '../findFilesTool';
@@ -217,6 +218,53 @@ suite('FindFiles - absolute workspace folder path', () => {
 		await tool.invoke({ input: { query: 'src/**/*.ts' }, toolInvocationToken: null! }, CancellationToken.None);
 
 		expect(searchService.lastOptions?.caseInsensitive).toBe(true);
+	});
+
+	suite('external folder', () => {
+		const externalFolder = isWindows ? 'c:\\other\\project' : '/other/project';
+		const externalQuery = isWindows ? `${externalFolder}\\**\\*.ts` : `${externalFolder}/**/*.ts`;
+		const promptContextWithPermission = (permissionLevel: string) => ({ request: { permissionLevel } }) as unknown as IBuildPromptContext;
+
+		async function run(permissionLevel: string, query = externalQuery) {
+			const searchService = setup();
+			const tool = accessor.get(IInstantiationService).createInstance(FindFilesTool);
+			const input = await tool.resolveInput({ query }, promptContextWithPermission(permissionLevel), CopilotToolMode.PartialContext);
+			const prepared = await tool.prepareInvocation({ input }, CancellationToken.None);
+			await tool.invoke({ input, toolInvocationToken: null! }, CancellationToken.None);
+			const pattern = searchService.lastFilePattern![0];
+			return {
+				hasConfirmation: !!prepared?.confirmationMessages,
+				pattern: typeof pattern === 'string' ? pattern : { base: pattern.baseUri.toString(), pattern: pattern.pattern },
+			};
+		}
+
+		test('searches external folder with confirmation in autopilot', async () => {
+			expect(await run('autopilot')).toEqual({
+				hasConfirmation: true,
+				pattern: { base: URI.file(externalFolder).toString(), pattern: '**/*.ts' },
+			});
+		});
+
+		test('searches external folder with confirmation when bypassing approvals', async () => {
+			expect(await run('autoApprove')).toEqual({
+				hasConfirmation: true,
+				pattern: { base: URI.file(externalFolder).toString(), pattern: '**/*.ts' },
+			});
+		});
+
+		test.skipIf(!isWindows)('searches external UNC folder with confirmation in autopilot', async () => {
+			expect(await run('autopilot', '\\\\server\\share\\project\\**\\*.ts')).toEqual({
+				hasConfirmation: true,
+				pattern: { base: URI.file('\\\\server\\share\\project').toString(), pattern: '**/*.ts' },
+			});
+		});
+
+		test('keeps existing behavior with default permissions', async () => {
+			expect(await run('default')).toEqual({
+				hasConfirmation: false,
+				pattern: externalQuery,
+			});
+		});
 	});
 });
 

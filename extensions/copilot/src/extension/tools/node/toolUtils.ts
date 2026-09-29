@@ -55,26 +55,81 @@ export interface InputGlobResult {
 	readonly folderName: string | undefined;
 	/** The glob pattern within the folder (e.g. `src/**`), for display. Only set when folderName is set. */
 	readonly folderRelativePattern: string | undefined;
+	/** The base folder of the search when the input was an absolute path outside the workspace. */
+	readonly externalBaseUri?: URI;
+}
+
+/**
+ * Returns true when the current chat request runs at an auto-approve permission level
+ * (Bypass Approvals / Autopilot), or when the global tool auto-approve setting is enabled.
+ */
+export function isAutoApproveSession(promptContext: IBuildPromptContext | undefined, configurationService: IConfigurationService): boolean {
+	const permissionLevel = promptContext?.request?.permissionLevel;
+	if (permissionLevel === 'autoApprove' || permissionLevel === 'autopilot') {
+		return true;
+	}
+	return configurationService.getNonExtensionConfig<unknown>('chat.tools.global.autoApprove') === true;
+}
+
+const globCharsRegex = /[*?[\]{}]/;
+
+/**
+ * Splits an absolute path or glob (e.g. `/other/src/**\/*.ts`) into a base folder path
+ * and the glob patterns to match beneath it. A path without glob characters is treated
+ * as either a file or a folder, so both `name` and `name/**` are matched.
+ * Throws when the base would be a file system root.
+ */
+function splitExternalGlob(query: string): { basePath: string; patterns: string[] } {
+	const normalized = query.replace(/\\/g, '/').replace(/(?<=.)\/+$/, '');
+	const segments = normalized.split('/');
+	const globIndex = segments.findIndex(segment => globCharsRegex.test(segment));
+
+	let baseSegments: string[];
+	let patterns: string[];
+	if (globIndex === -1) {
+		const name = segments[segments.length - 1];
+		baseSegments = segments.slice(0, -1);
+		patterns = [name, `${name}/**`];
+	} else {
+		baseSegments = segments.slice(0, globIndex);
+		patterns = [segments.slice(globIndex).join('/')];
+	}
+
+	const basePath = baseSegments.join('/');
+	const meaningfulSegmentCount = baseSegments.filter(segment => segment !== '' && !/^[a-zA-Z]:$/.test(segment)).length;
+	const isUncPath = basePath.startsWith('//');
+	if (meaningfulSegmentCount === 0 || (isUncPath && meaningfulSegmentCount <= 2)) {
+		throw new Error(`Searching from the root of the file system is not supported: ${query}. Use a more specific base folder.`);
+	}
+
+	return { basePath, patterns };
 }
 
 /**
  * Converts a user input glob or file path into VS Code glob patterns.
  * Handles:
  * - Absolute paths within a workspace folder
+ * - Absolute paths outside the workspace, when `resolveExternalPath` is provided
  * - Patterns prefixed with a workspace folder name (e.g. `folderName/src/**`)
  * - Patterns prefixed with `** /folderName/...` in multi-root workspaces
  * - When a working directory is set (agents window), unscoped patterns
  *   are scoped to it so searches target the session's folder.
+ *
+ * @param resolveExternalPath When provided, absolute paths outside the workspace are scoped
+ * to their own base folder, which is resolved to a URI with this function.
  */
-export function inputGlobToPattern(query: string, workingDir: WorkingDirectory, modelFamily: string | undefined): InputGlobResult {
+export function inputGlobToPattern(query: string, workingDir: WorkingDirectory, modelFamily: string | undefined, resolveExternalPath?: (path: string) => URI | undefined): InputGlobResult {
 	let pattern: vscode.GlobPattern = query;
 	let folderName: string | undefined;
 	let folderRelativePattern: string | undefined;
+	let externalBaseUri: URI | undefined;
+	const extraPatterns: vscode.GlobPattern[] = [];
 
 	if (isAbsolute(query)) {
+		let workspaceFolder: URI | undefined;
 		try {
 			const uri = URI.file(query);
-			const workspaceFolder = workingDir.getFolder(uri);
+			workspaceFolder = workingDir.getFolder(uri);
 			if (workspaceFolder) {
 				const relative = extUriBiasedIgnorePathCase.relativePath(workspaceFolder, uri) || '';
 				pattern = new RelativePattern(workspaceFolder, relative);
@@ -83,6 +138,18 @@ export function inputGlobToPattern(query: string, workingDir: WorkingDirectory, 
 			}
 		} catch (e) {
 			// ignore
+		}
+
+		if (!workspaceFolder && resolveExternalPath) {
+			const { basePath, patterns: externalPatterns } = splitExternalGlob(query);
+			const baseUri = resolveExternalPath(basePath);
+			if (baseUri) {
+				externalBaseUri = baseUri;
+				pattern = new RelativePattern(baseUri, externalPatterns[0]);
+				for (const extra of externalPatterns.slice(1)) {
+					extraPatterns.push(new RelativePattern(baseUri, extra));
+				}
+			}
 		}
 	}
 
@@ -118,12 +185,12 @@ export function inputGlobToPattern(query: string, workingDir: WorkingDirectory, 
 		pattern = new RelativePattern(workingDir.uri!, pattern);
 	}
 
-	const patterns = [pattern];
+	const patterns = [pattern, ...extraPatterns];
 
 	// For gpt-4.1, it struggles to append /** to the pattern itself, so here we work around it by
 	// adding a second pattern with /** appended.
 	// Other models are smart enough to append the /** suffix so they don't need this workaround.
-	if (modelFamily === 'gpt-4.1') {
+	if (modelFamily === 'gpt-4.1' && extraPatterns.length === 0) {
 		if (typeof pattern === 'string' && !pattern.endsWith('/**')) {
 			patterns.push(pattern + '/**');
 		} else if (typeof pattern !== 'string' && !pattern.pattern.endsWith('/**')) {
@@ -131,7 +198,7 @@ export function inputGlobToPattern(query: string, workingDir: WorkingDirectory, 
 		}
 	}
 
-	return { patterns, folderName, folderRelativePattern };
+	return { patterns, folderName, folderRelativePattern, externalBaseUri };
 }
 
 /**

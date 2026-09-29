@@ -9,6 +9,7 @@ import { IPromptPathRepresentationService } from '../../../platform/prompts/comm
 import { URI } from '../../../util/vs/base/common/uri';
 
 import * as l10n from '@vscode/l10n';
+import { IConfigurationService } from '../../../platform/configuration/common/configurationService';
 import { IEndpointProvider } from '../../../platform/endpoint/common/endpointProvider';
 import { ISearchService } from '../../../platform/search/common/searchService';
 import { ITelemetryService } from '../../../platform/telemetry/common/telemetry';
@@ -23,7 +24,8 @@ import { IBuildPromptContext } from '../../prompt/common/intents';
 import { renderPromptElementJSON } from '../../prompts/node/base/promptRenderer';
 import { ToolName } from '../common/toolNames';
 import { CopilotToolMode, ICopilotTool, ToolRegistry } from '../common/toolsRegistry';
-import { checkCancellation, inputGlobToPattern, patternContainsWorkspaceFolderPath } from './toolUtils';
+import { formatUriForFileWidget } from '../common/toolUtils';
+import { checkCancellation, InputGlobResult, inputGlobToPattern, isAutoApproveSession, patternContainsWorkspaceFolderPath } from './toolUtils';
 
 export interface IFindFilesToolParams {
 	query: string;
@@ -34,12 +36,16 @@ export class FindFilesTool implements ICopilotTool<IFindFilesToolParams> {
 	public static readonly toolName = ToolName.FindFiles;
 	public static readonly nonDeferred = true;
 
+	private _promptContext: IBuildPromptContext | undefined;
+
 	constructor(
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@ISearchService private readonly searchService: ISearchService,
 		@IWorkspaceService private readonly workspaceService: IWorkspaceService,
 		@IEndpointProvider private readonly endpointProvider: IEndpointProvider,
 		@ITelemetryService private readonly telemetryService: ITelemetryService,
+		@IConfigurationService private readonly configurationService: IConfigurationService,
+		@IPromptPathRepresentationService private readonly promptPathRepresentationService: IPromptPathRepresentationService,
 	) { }
 
 	async invoke(options: vscode.LanguageModelToolInvocationOptions<IFindFilesToolParams>, token: CancellationToken) {
@@ -56,7 +62,7 @@ export class FindFilesTool implements ICopilotTool<IFindFilesToolParams> {
 
 		// The input _should_ be a pattern matching inside a workspace, folder, but sometimes we get absolute paths, so try to resolve them
 		const workingDir = new WorkingDirectory(options.workingDirectory, this.workspaceService);
-		const globResult = inputGlobToPattern(options.input.query, workingDir, modelFamily);
+		const globResult = inputGlobToPattern(options.input.query, workingDir, modelFamily, this.getExternalPathResolver());
 
 		void this.sendSearchToolTelemetry(options, globResult.folderName);
 
@@ -115,14 +121,38 @@ export class FindFilesTool implements ICopilotTool<IFindFilesToolParams> {
 	}
 
 	prepareInvocation(options: vscode.LanguageModelToolInvocationPrepareOptions<IFindFilesToolParams>, token: vscode.CancellationToken): vscode.ProviderResult<vscode.PreparedToolInvocation> {
-		const globResult = inputGlobToPattern(options.input.query, new WorkingDirectory(undefined, this.workspaceService), undefined);
+		const globResult = inputGlobToPattern(options.input.query, new WorkingDirectory(options.workingDirectory, this.workspaceService), undefined, this.getExternalPathResolver());
 		const query = this.formatQueryLabel(globResult, options.input.query);
-		return {
-			invocationMessage: new MarkdownString(l10n.t`Searching for files matching ${query}`)
-		};
+		const invocationMessage = new MarkdownString(l10n.t`Searching for files matching ${query}`);
+		if (globResult.externalBaseUri) {
+			const folder = formatUriForFileWidget(globResult.externalBaseUri);
+			const message = this.workspaceService.getWorkspaceFolders().length === 1
+				? new MarkdownString(l10n.t`${folder} is outside of the current folder.`)
+				: new MarkdownString(l10n.t`${folder} is outside of the current workspace.`);
+			return {
+				invocationMessage,
+				confirmationMessages: {
+					title: l10n.t`Allow searching external folder?`,
+					message,
+				}
+			};
+		}
+		return { invocationMessage };
 	}
 
-	private formatQueryLabel(globResult: { folderName?: string; folderRelativePattern?: string }, rawQuery: string): string {
+	/**
+	 * Absolute paths outside the workspace are only searched when the session auto-approves
+	 * tool calls. The external search still goes through a confirmation, which the core
+	 * auto-approves while respecting enterprise policy.
+	 */
+	private getExternalPathResolver(): ((path: string) => URI | undefined) | undefined {
+		if (!isAutoApproveSession(this._promptContext, this.configurationService)) {
+			return undefined;
+		}
+		return path => this.promptPathRepresentationService.resolveFilePath(path);
+	}
+
+	private formatQueryLabel(globResult: InputGlobResult, rawQuery: string): string {
 		if (globResult.folderName) {
 			if (globResult.folderRelativePattern && globResult.folderRelativePattern !== '**') {
 				return `\`${globResult.folderName}\` \u00B7 \`${globResult.folderRelativePattern}\``;
@@ -132,9 +162,10 @@ export class FindFilesTool implements ICopilotTool<IFindFilesToolParams> {
 		return `\`${rawQuery}\``;
 	}
 
-	async resolveInput(input: IFindFilesToolParams, _promptContext: IBuildPromptContext, mode: CopilotToolMode): Promise<IFindFilesToolParams> {
+	async resolveInput(input: IFindFilesToolParams, promptContext: IBuildPromptContext, mode: CopilotToolMode): Promise<IFindFilesToolParams> {
+		this._promptContext = promptContext;
 		let query = input.query;
-		if (!query.startsWith('**/') && !query.startsWith('/') && !query.includes(':')) {
+		if (!query.startsWith('**/') && !query.startsWith('/') && !query.startsWith('\\') && !query.includes(':')) {
 			query = `**/${query}`;
 		}
 

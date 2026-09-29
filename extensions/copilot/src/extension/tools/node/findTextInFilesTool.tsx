@@ -29,7 +29,8 @@ import { renderPromptElementJSON } from '../../prompts/node/base/promptRenderer'
 import { Tag } from '../../prompts/node/base/tag';
 import { ToolName } from '../common/toolNames';
 import { CopilotToolMode, ICopilotTool, ToolRegistry } from '../common/toolsRegistry';
-import { checkCancellation, InputGlobResult, inputGlobToPattern, patternContainsWorkspaceFolderPath } from './toolUtils';
+import { formatUriForFileWidget } from '../common/toolUtils';
+import { checkCancellation, InputGlobResult, inputGlobToPattern, isAutoApproveSession, patternContainsWorkspaceFolderPath } from './toolUtils';
 import { IExperimentationService } from '../../../lib/node/chatLibMain';
 
 interface IFindTextInFilesToolParams {
@@ -61,6 +62,8 @@ export class FindTextInFilesTool implements ICopilotTool<IFindTextInFilesToolPar
 	public static readonly toolName = ToolName.FindTextInFiles;
 	public static readonly nonDeferred = true;
 
+	private _promptContext: IBuildPromptContext | undefined;
+
 	constructor(
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@ISearchService private readonly searchService: ISearchService,
@@ -84,7 +87,7 @@ export class FindTextInFilesTool implements ICopilotTool<IFindTextInFilesToolPar
 
 		// The input _should_ be a pattern matching inside a workspace, folder, but sometimes we get absolute paths, so try to resolve them
 		const workingDir = new WorkingDirectory(options.workingDirectory, this.workspaceService);
-		const globResult = options.input.includePattern ? inputGlobToPattern(options.input.includePattern, workingDir, modelFamily) : undefined;
+		const globResult = options.input.includePattern ? inputGlobToPattern(options.input.includePattern, workingDir, modelFamily, this.getExternalPathResolver()) : undefined;
 		let patterns = globResult?.patterns;
 
 		// When no include pattern is specified but a working directory is set (agents window),
@@ -397,13 +400,37 @@ Then if you want to include those files you can call the tool again by setting "
 
 	prepareInvocation(options: vscode.LanguageModelToolInvocationPrepareOptions<IFindTextInFilesToolParams>, token: vscode.CancellationToken): vscode.ProviderResult<vscode.PreparedToolInvocation> {
 		const isRegExp = options.input.isRegexp ?? true;
-		const globResult = options.input.includePattern ? inputGlobToPattern(options.input.includePattern, new WorkingDirectory(undefined, this.workspaceService), undefined) : undefined;
+		const globResult = options.input.includePattern ? inputGlobToPattern(options.input.includePattern, new WorkingDirectory(options.workingDirectory, this.workspaceService), undefined, this.getExternalPathResolver()) : undefined;
 		const query = this.formatQueryString(options.input, globResult);
-		return {
-			invocationMessage: isRegExp ?
-				new MarkdownString(l10n.t`Searching for regex ${query}`) :
-				new MarkdownString(l10n.t`Searching for text ${query}`),
-		};
+		const invocationMessage = isRegExp ?
+			new MarkdownString(l10n.t`Searching for regex ${query}`) :
+			new MarkdownString(l10n.t`Searching for text ${query}`);
+		if (globResult?.externalBaseUri) {
+			const folder = formatUriForFileWidget(globResult.externalBaseUri);
+			const message = this.workspaceService.getWorkspaceFolders().length === 1
+				? new MarkdownString(l10n.t`${folder} is outside of the current folder.`)
+				: new MarkdownString(l10n.t`${folder} is outside of the current workspace.`);
+			return {
+				invocationMessage,
+				confirmationMessages: {
+					title: l10n.t`Allow searching external folder?`,
+					message,
+				}
+			};
+		}
+		return { invocationMessage };
+	}
+
+	/**
+	 * Absolute paths outside the workspace are only searched when the session auto-approves
+	 * tool calls. The external search still goes through a confirmation, which the core
+	 * auto-approves while respecting enterprise policy.
+	 */
+	private getExternalPathResolver(): ((path: string) => URI | undefined) | undefined {
+		if (!isAutoApproveSession(this._promptContext, this.configurationService)) {
+			return undefined;
+		}
+		return path => this.promptPathRepresentationService.resolveFilePath(path);
 	}
 
 	/**
@@ -435,13 +462,14 @@ Then if you want to include those files you can call the tool again by setting "
 		return querySpan;
 	}
 
-	async resolveInput(input: IFindTextInFilesToolParams, _promptContext: IBuildPromptContext, mode: CopilotToolMode): Promise<IFindTextInFilesToolParams> {
+	async resolveInput(input: IFindTextInFilesToolParams, promptContext: IBuildPromptContext, mode: CopilotToolMode): Promise<IFindTextInFilesToolParams> {
+		this._promptContext = promptContext;
 		let includePattern = input.includePattern;
 		if (includePattern === '**') {
 			includePattern = undefined;
 		}
 
-		if (includePattern && !includePattern.startsWith('**/') && !includePattern.startsWith('/') && !includePattern.includes(':')) {
+		if (includePattern && !includePattern.startsWith('**/') && !includePattern.startsWith('/') && !includePattern.startsWith('\\') && !includePattern.includes(':')) {
 			includePattern = `**/${includePattern}`;
 		}
 		if (includePattern && includePattern.endsWith('/')) {
